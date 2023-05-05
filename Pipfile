@@ -1,0 +1,23 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+django = "*"
+djangorestframework = "*"
+psycopg2-binary = "*"
+python-environ = "*"
+pandas = "*"
+pydantic = "*"
+django-extensions = "*"
+django-filter = "*"
+numpy = "*"
+
+[dev-packages]
+django-debug-toolbar = "*"
+pre-commit = "*"
+
+[requires]
+python_version = "3.10"
+python_full_version = "3.10.6"
