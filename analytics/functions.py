@@ -4,7 +4,8 @@ from datetime import datetime
 
 def validate_date_string(date_string: str) -> bool:
     """
-    Checks whether 'date_string' is real date
+    Checks whether 'date_string' is real date and matches one of
+    determined interval types
     """
     pattern = re.compile(r'\d{4}-\d{2}-\d{2}')
     if not pattern.match(date_string):
@@ -13,4 +14,18 @@ def validate_date_string(date_string: str) -> bool:
         datetime.strptime(date_string, '%Y-%m-%d')
         return True
     except ValueError:
-        return False
+        pass
+
+    try:
+        datetime.strptime(date_string, '%m-%Y')
+        return True
+    except ValueError:
+        pass
+
+    try:
+        datetime.strptime(date_string, '%Y')
+        return True
+    except ValueError:
+        pass
+
+    return False
