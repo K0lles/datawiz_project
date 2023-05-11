@@ -37,3 +37,13 @@ class Product(models.Model):
 class FullCategoryProductMaterializedView(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     category = models.ForeignKey(Category, on_delete=models.PROTECT)
+
+    @classmethod
+    @property
+    def is_auxiliary(cls) -> bool:
+        return True
+
+    @classmethod
+    @property
+    def get_auxiliary_name(cls) -> str:
+        return 'category__'

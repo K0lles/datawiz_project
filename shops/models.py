@@ -30,3 +30,13 @@ class Shop(models.Model):
 class FullShopGroupShopMaterializedView(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.PROTECT)
     group = models.ForeignKey(ShopGroup, on_delete=models.PROTECT)
+
+    @classmethod
+    @property
+    def is_auxiliary(cls) -> bool:
+        return True
+
+    @classmethod
+    @property
+    def get_auxiliary_name(cls) -> str:
+        return 'group__'

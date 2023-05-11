@@ -14,18 +14,4 @@ def validate_date_string(date_string: str) -> bool:
         datetime.strptime(date_string, '%Y-%m-%d')
         return True
     except ValueError:
-        pass
-
-    try:
-        datetime.strptime(date_string, '%m-%Y')
-        return True
-    except ValueError:
-        pass
-
-    try:
-        datetime.strptime(date_string, '%Y')
-        return True
-    except ValueError:
-        pass
-
-    return False
+        return False

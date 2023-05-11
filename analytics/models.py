@@ -6,13 +6,14 @@ from django.db.models.functions import TruncDay, TruncMonth, TruncYear
 from django.db.models.functions.datetime import TruncBase
 from django.utils.translation import gettext_lazy as _
 
-from products.models import Category, Producer, Product
+from products.models import (FullCategoryProductMaterializedView, Producer,
+                             Product)
 from receipts.models import Supplier, Terminal
-from shops.models import Shop, ShopGroup
+from shops.models import FullShopGroupShopMaterializedView, Shop
 
 
 class DimensionEnum(Enum):
-    category = ('category', Category, ('id', 'name'))
+    category = ('category', FullCategoryProductMaterializedView, ('id', 'name'))
     product = ('product', Product, ('id', 'name', 'article', 'barcode'))
     producer = ('producer', Producer, ('name',))
 
@@ -20,7 +21,7 @@ class DimensionEnum(Enum):
     supplier = ('supplier', Supplier, ('name',))
 
     shop = ('shop', Shop, ('id', 'name'))
-    shop_group = ('shop_group', ShopGroup, ('id', 'name'))
+    shop_group = ('shop_group', FullShopGroupShopMaterializedView, ('id', 'name'))
 
     @classmethod
     def get_model_by_name(cls, name: str) -> Type[Model]:
