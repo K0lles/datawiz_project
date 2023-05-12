@@ -25,7 +25,7 @@ class ModelMetric:
         self.prefetch_related = []
         self.distinct_fields = []
 
-    def process_options(self) -> dict | None:
+    def process_options(self) -> dict:
         if self.options:
             filtering_options = {}
             for option in self.options:
@@ -34,15 +34,28 @@ class ModelMetric:
                                           validated_dict.get('value')})
             return filtering_options
 
+        return {}
+
     def perform_field_assignment(self, field: str) -> str:
         """
         Performs concatenation of base model field 'base_field' to defined
         receipt's field.
         """
         self.extend_prefetch_related(f'{self.base_field}__cartitem_set')
-        return f'{self.cut_base_field()}__{field}'
+        field_to_paste = f'{self.cut_base_field()}__{field}'
+
+        if field_to_paste.startswith('__'):
+            field_to_paste = field_to_paste[2::]
+
+        if field_to_paste.endswith('__'):
+            field_to_paste = field_to_paste[:len(field_to_paste) - 2]
+
+        return field_to_paste
 
     def extend_prefetch_related(self, value: str) -> None:
+        if value.startswith('__'):
+            value = value[2:]
+
         if self.name == 'receipt_amount':
 
             # if 'base_field' contains 'receipt_set' it is not necessary to add 'receipt_set' so
@@ -99,7 +112,7 @@ class ModelMetric:
         """
         Returns annotate query for getting amount of receipts
         """
-        field_to_paste = self.perform_field_assignment('receipt' if not self.contains_receipt else '')
+        field_to_paste = self.perform_field_assignment('cartitem__receipt' if not self.contains_receipt else '')
 
         # if field ends with '__' in case absence 'receipt' in 'base_field'
         # it cuts off 2 last underscores
@@ -129,6 +142,11 @@ class ModelMetric:
         annotation = {'first_product_date': Subquery(subquery, output_field=DateField())}
         return annotation
 
+    def last_product_date(self) -> dict:
+        subquery = CartItem.objects.filter(**self.form_subquery_filtering()).order_by('-date').values('date')[:1]
+        annotation = {'last_product_date': Subquery(subquery, output_field=DateField())}
+        return annotation
+
     def clear_related(self) -> None:
         """
         If call many times some function,
@@ -151,11 +169,6 @@ class ModelMetric:
             raise ValueError(_('Вкажіть правильний "name".'))
 
         return func()
-
-    def last_product_date(self) -> dict:
-        subquery = CartItem.objects.filter(**self.form_subquery_filtering()).order_by('-date').values('date')[:1]
-        annotation = {'last_product_date': Subquery(subquery, output_field=DateField())}
-        return annotation
 
     def empty_value(self) -> dict:
         return {self.name: Value('-', output_field=CharField())}
@@ -182,14 +195,19 @@ class ModelMetric:
         }
 
 
-class ShopMetric(ModelMetric):
-    base_field = 'receipt_set'
+class ProductMetric(ModelMetric):
+    base_field = ''
+    contains_receipt = False
 
     def product_article(self) -> dict:
         return {self.name: Value('article', output_field=TextField())}
 
     def product_barcode(self) -> dict:
         return {self.name: Value('barcode', output_field=TextField())}
+
+
+class ShopMetric(ModelMetric):
+    base_field = 'receipt_set'
 
 
 class FullShopGroupShopMaterializedViewMetric(ModelMetric):
@@ -203,3 +221,18 @@ class FullCategoryProductMaterializedViewMetric(ModelMetric):
 
 class TerminalMetric(ModelMetric):
     base_field = 'receipt_set'
+
+
+class SupplierMetric(ModelMetric):
+    base_field = ''
+    contains_receipt = False
+
+
+class ProducerMetric(ModelMetric):
+    base_field = 'product_set'
+    contains_receipt = False
+
+
+class CartItemMetric(ModelMetric):
+    base_field = ''
+    contains_receipt = False

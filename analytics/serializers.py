@@ -1,20 +1,29 @@
-from typing import Dict, List, Literal, Optional, Type
+from datetime import datetime
+from typing import Any, List, Literal, Optional, Type
 
 from django.db.models import Model
 from django.utils.translation import gettext_lazy as _
 from pydantic import BaseModel, root_validator, validator
 
 from analytics.functions import validate_date_string
-from analytics.models import DimensionEnum, IntervalEnum
-from receipts.models import Receipt
+from analytics.models import DimensionEnum, IntervalEnum, MetricNameEnum
+from receipts.models import CartItem
 
 CONDITION_OPTIONS: Type[str] = Literal['lte', 'gte', 'lt', 'gt', 'exact']
 
-METRIC_OPTIONS: list = ['turnover', 'turnover_diff', 'turnover_diff_percent',
-                        'average_price', 'average_price_diff', 'average_price_diff_percent',
-                        'income', 'income_diff', 'income__diff_percent',
-                        'sold_product_amount', 'sold_product_amount_diff', 'sold_product_amount_diff_percent',
-                        'receipt_amount', 'receipt_amount_diff', 'receipt_amount_diff_percent']
+
+class DimensionQualifierBaseModel(BaseModel):
+    name: str
+
+    @validator('name')
+    @classmethod
+    def validate_name_base_model(cls, v: str) -> Type[BaseModel]:
+        if v in list(IntervalEnum.get_applicable_fields()):
+            return IntervalBaseModel
+        elif v in list(DimensionEnum.__members__):
+            return DimensionBaseModel
+
+        raise ValueError(_('Оберіть правильний "name".'))
 
 
 class DimensionBaseModel(BaseModel):
@@ -69,6 +78,8 @@ class DimensionBaseModel(BaseModel):
                 raise ValueError(_(f"{key} не є припустимим полем."))
             v['filtering'][f'{key}__{option}'] = item
 
+        v['pre_values'] = []
+
         return v
 
     @root_validator
@@ -91,6 +102,8 @@ class DimensionBaseModel(BaseModel):
             new_filter_conditions[f'{getattr(model, "get_auxiliary_name")}{key}'] = value
 
         v['filtering'] = new_filter_conditions
+
+        v['pre_annotating'] = {}
         return v
 
 
@@ -102,8 +115,9 @@ class IntervalBaseModel(BaseModel):
     def assign_fields_for_search(cls, v) -> dict:
         name = v.get('name')
 
-        v['annotating'] = {'interval': IntervalEnum.get_trunc_by_name(name)}
-        v['name'] = Receipt
+        v['pre_values'] = [name]
+        v['pre_annotating'] = {'interval': IntervalEnum.get_trunc_by_name(name)}
+        v['name'] = CartItem
         return v
 
 
@@ -127,7 +141,7 @@ class MetricsBaseModel(BaseModel):
                 raise ValueError(_('У кожному "metric" повинен бути "name".'))
 
             # checks whether metric_name is valid
-            if metric_name not in METRIC_OPTIONS:
+            if metric_name not in MetricNameEnum.get_values():
                 raise ValueError(_('Введіть правильний варіант "name".'))
 
         return v
@@ -160,7 +174,7 @@ class MetricsBaseModel(BaseModel):
 
     @root_validator
     @classmethod
-    def define_pre_post_metrics(cls, values: dict) -> Dict[str, list]:
+    def define_pre_post_metrics(cls, values: dict) -> dict[str, list[Any] | bool]:
         """
         Sorts metrics by sequence of their execution. Metrics, that must be executed in
         dataframes will be populated into 'dataframe_filtering', others - in
@@ -176,22 +190,96 @@ class MetricsBaseModel(BaseModel):
             else:
                 post_filtering.append(metric)
 
-        return {'post_filtering': post_filtering, 'dataframe_filtering': dataframe_filtering}
-
-
-class DateRangeBaseModel(BaseModel):
-    date__lte: Optional[str]
-    date__gte: Optional[str]
-
-    previous: Optional[bool] = False
+        return {'post_filtering': post_filtering, 'dataframe_filtering': dataframe_filtering,
+                'required_date_ranges': True if dataframe_filtering else False}
 
     @root_validator
     @classmethod
-    def validate_date(cls, values: dict):
-        if all([value is None for value in values.values()]):
-            raise ValueError(_('Принаймані один із параметрів повинен бути присутнім.'))
+    def adapt_post_filtering(cls, values: dict) -> dict[str, list[Any] | bool]:
+        """
+        If 'dataframe_filtering' is present, checks whether basic field by
+        which difference will be defined presents
+        """
+        if values.get('required_date_ranges', None):
+            v = values.get('dataframe_filtering', None)
 
-        if not validate_date_string(values.get('date__lte')) or validate_date_string(values.get('date__gte')):
-            raise ValueError(_('Укажіть правильно дату.'))
+            # getting names of post_filtering and dataframe_filtering which presents in lists currently
+            post_filtering_names: list[str] = [d['name'] for d in values.get('post_filtering')]
+            dataframe_filtering_names: list[str] = [d['name'] for d in v]
+
+            # checking whether difference base field presents in post_filtering lists, if not we add it
+            for df_name in dataframe_filtering_names:
+                post_name = df_name.replace('_diff', '').replace('_percent', '')
+                if post_name not in post_filtering_names:
+                    values['post_filtering'].append({'name': post_name})
 
         return values
+
+
+class DateRangeBaseModel(BaseModel):
+    date_range: list[str, str]  # change to date
+    prev_date_range: Optional[list[str, str]]
+
+    previous: bool = False
+
+    @validator('date_range')
+    @classmethod
+    def validate_date_range(cls, v: list[str, str]) -> list[str, str]:
+        if not validate_date_string(v[0]) or not validate_date_string(v[1]):
+            raise ValueError(_('Введіть коректні дати.'))
+        return v
+
+    @root_validator
+    @classmethod
+    def validate_prev_existence(cls, v: dict) -> dict:
+        if v.get('previous', None):
+            if not v.get('prev_date_range', None):
+                raise ValueError(_('Ви повинні указати попередні дати для вибірки.'))
+            if not validate_date_string(v.get('prev_date_range')[0]) \
+                    or not validate_date_string(v.get('prev_date_range')[1]):
+                raise ValueError(_('Введіть коректні дати.'))
+        return v
+
+    @validator('date_range')
+    @classmethod
+    def check_date_difference(cls, v: list[str, str]) -> list[str, str]:
+        lower_date = datetime.strptime(v[0], '%Y-%m-%d')
+        higher_date = datetime.strptime(v[1], '%Y-%m-%d')
+
+        if lower_date >= higher_date:
+            raise ValueError(_('Дати повинні різнитися та початкова дата повинна бути меншою за кінцеву.'))
+
+        return v
+
+    @validator('prev_date_range')
+    @classmethod
+    def check_prev_date_difference(cls, v: list[str, str]) -> list[str, str]:
+        lower_date = datetime.strptime(v[0], '%Y-%m-%d')
+        higher_date = datetime.strptime(v[1], '%Y-%m-%d')
+
+        if lower_date >= higher_date:
+            raise ValueError(_('Дати повинні різнитися та початкова дата повинна бути меншою за кінцеву.'))
+
+        return v
+
+    @root_validator
+    @classmethod
+    def parse_dates_to_filtering_conditions(cls, v: dict) -> dict:
+        answer = {'previous': v.get('previous', False)}
+
+        if v.get('previous', None):
+            answer['previous'] = True
+
+            answer['previous_pre_filtering'] = {}
+            date_range: list = v.get('prev_date_range', None)
+
+            answer['previous_pre_filtering']['date__gte'] = date_range[0]
+            answer['previous_pre_filtering']['date__lte'] = date_range[1]
+
+        answer['pre_filtering'] = {}
+
+        date_range: list = v.get('date_range')
+        answer['pre_filtering']['date__gte'] = date_range[0]
+        answer['pre_filtering']['date__lte'] = date_range[1]
+
+        return answer
