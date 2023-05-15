@@ -236,3 +236,7 @@ class ProducerMetric(ModelMetric):
 class CartItemMetric(ModelMetric):
     base_field = ''
     contains_receipt = False
+
+    def perform_field_assignment(self, field: str) -> str:
+        field = field.replace('cartitem__', '')
+        return super().perform_field_assignment(field)

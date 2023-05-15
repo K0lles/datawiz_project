@@ -1,8 +1,5 @@
 import re
 from datetime import datetime
-from typing import Type
-
-from django.db.models import Model
 
 
 def validate_date_string(date_string: str) -> bool:
@@ -20,13 +17,16 @@ def validate_date_string(date_string: str) -> bool:
         return False
 
 
-def assign_path_to_date_field(model: Type[Model], pre_filtering: dict[str, str]) -> dict[str, str]:
+def assign_path_to_date_field(metric_model_name: str, model_metric_base_field: str, pre_filtering: dict[str, str]) \
+        -> dict[str, str]:
     """
     Returns dict with assigned date fields for further correct pre-filtering
     """
-    metric_name: str = model.__name__ + 'Metric'
-    base_field: str = getattr(globals()[metric_name], 'base_field').replace('_set', '')
-    assigning_field = f'{base_field}__cartitem__' if metric_name != 'CartItemMetric' else ''
+    base_field: str = model_metric_base_field.replace('_set', '')
+    assigning_field = f'{base_field}__cartitem__' if metric_model_name != 'CartItemMetric' else ''
+
+    if assigning_field.startswith('__'):
+        assigning_field = assigning_field[2:]
 
     new_pre_filtering = {}
     for key, value in pre_filtering.items():

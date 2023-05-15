@@ -116,7 +116,7 @@ class IntervalBaseModel(BaseModel):
         name = v.get('name')
 
         v['pre_values'] = [name]
-        v['pre_annotating'] = {'interval': IntervalEnum.get_trunc_by_name(name)}
+        v['pre_annotation'] = {name: IntervalEnum.get_trunc_by_name(name)}
         v['name'] = CartItem
         return v
 
