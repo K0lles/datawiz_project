@@ -14,11 +14,11 @@ from shops.models import FullShopGroupShopMaterializedView, Shop
 
 class DimensionEnum(Enum):
     category = ('category', FullCategoryProductMaterializedView, ('id', 'name'))
-    product = ('product', Product, ('id', 'name', 'article', 'barcode'))
-    producer = ('producer', Producer, ('name',))
+    product = ('product', Product, ('id', 'name'))
+    producer = ('producer', Producer, ('id', 'name',))
 
-    terminal = ('terminal', Terminal, ('name',))
-    supplier = ('supplier', Supplier, ('name',))
+    terminal = ('terminal', Terminal, ('id', 'name',))
+    supplier = ('supplier', Supplier, ('id', 'name',))
 
     shop = ('shop', Shop, ('id', 'name'))
     shop_group = ('shop_group', FullShopGroupShopMaterializedView, ('id', 'name'))

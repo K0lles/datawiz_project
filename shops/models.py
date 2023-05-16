@@ -4,7 +4,7 @@ from django.db import models
 
 
 class ShopGroup(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, db_index=True)
     parent = models.ForeignKey("ShopGroup", on_delete=models.PROTECT, blank=True, null=True)
     left = models.BigIntegerField()
     right = models.BigIntegerField()
@@ -23,7 +23,7 @@ class ShopGroup(models.Model):
 
 
 class Shop(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, db_index=True)
     group = models.ForeignKey(ShopGroup, on_delete=models.PROTECT)
 
 

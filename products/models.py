@@ -4,7 +4,7 @@ from django.db import models
 
 
 class Category(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, db_index=True)
     parent = models.ForeignKey("Category", on_delete=models.PROTECT, blank=True, null=True)
     left = models.BigIntegerField()
     right = models.BigIntegerField()
@@ -23,11 +23,11 @@ class Category(models.Model):
 
 
 class Producer(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, db_index=True)
 
 
 class Product(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, db_index=True)
     category = models.ForeignKey(Category, on_delete=models.PROTECT)
     producer = models.ForeignKey(Producer, on_delete=models.PROTECT, blank=True, null=True)
     article = models.TextField(blank=True, null=True)

@@ -1,6 +1,6 @@
-from django.db.models import (Avg, CharField, Count, DateField, FloatField,
-                              IntegerField, OuterRef, Subquery, Sum, TextField,
-                              Value)
+from django.db.models import (Avg, CharField, Count, DateField, F, FloatField,
+                              IntegerField, OuterRef, Subquery, Sum, Value)
+from django.db.models.functions import Round
 from django.utils.translation import gettext_lazy as _
 
 from analytics.serializers import MetricOptionBaseModel
@@ -80,7 +80,7 @@ class ModelMetric:
         receipts
         """
         field_to_paste = self.perform_field_assignment('cartitem__price')
-        query = {self.name: Avg(field_to_paste, output_field=FloatField())}
+        query = {self.name: Round(Avg(field_to_paste, output_field=FloatField()), 2)}
         return query
 
     def turnover(self) -> dict[str, Sum]:
@@ -89,7 +89,7 @@ class ModelMetric:
         by summing of qty sold items
         """
         field_to_paste = self.perform_field_assignment('cartitem__qty')
-        query = {self.name: Sum(field_to_paste, output_field=FloatField())}
+        query = {self.name: Round(Sum(field_to_paste, output_field=FloatField()), 2)}
         return query
 
     def income(self) -> dict[str, Sum]:
@@ -131,7 +131,7 @@ class ModelMetric:
         class_name = self.__class__.__name__.lower().replace('metric', '')
 
         # forming fields, which will appears in subquery filtering
-        filtering_cart_items_field = '__'.join(reversed_fields) + class_name + '__pk'
+        filtering_cart_items_field = '__'.join(reversed_fields) + '__' + class_name + '__pk'
 
         filtering_fields = {filtering_cart_items_field: OuterRef('pk')}
 
@@ -200,10 +200,10 @@ class ProductMetric(ModelMetric):
     contains_receipt = False
 
     def product_article(self) -> dict:
-        return {self.name: Value('article', output_field=TextField())}
+        return {self.name: F('article')}
 
     def product_barcode(self) -> dict:
-        return {self.name: Value('barcode', output_field=TextField())}
+        return {self.name: F('barcode')}
 
 
 class ShopMetric(ModelMetric):

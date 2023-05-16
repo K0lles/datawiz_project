@@ -78,8 +78,6 @@ class DimensionBaseModel(BaseModel):
                 raise ValueError(_(f"{key} не є припустимим полем."))
             v['filtering'][f'{key}__{option}'] = item
 
-        v['pre_values'] = []
-
         return v
 
     @root_validator
@@ -90,10 +88,12 @@ class DimensionBaseModel(BaseModel):
         auxiliary name for correct further filtering
         """
         model: Type[Model] = v.get('name')
-        filtering_conditions: dict = v.get('filtering', None)
+        filtering_conditions: dict = v.get('filtering', {})
+        v['pre_annotating'] = {}
+        v['pre_values'] = list(DimensionEnum.get_fields_by_model(model))
 
         # if is not auxiliary or have no filters returns dict
-        if not getattr(model, 'is_auxiliary', None) or not filtering_conditions:
+        if not getattr(model, 'is_auxiliary', None):
             return v
 
         # creates new dict and modifies all key names
@@ -101,9 +101,10 @@ class DimensionBaseModel(BaseModel):
         for key, value in filtering_conditions.items():
             new_filter_conditions[f'{getattr(model, "get_auxiliary_name")}{key}'] = value
 
-        v['filtering'] = new_filter_conditions
+        for index, value in enumerate(v['pre_values']):
+            v['pre_values'][index] = f'{getattr(model, "get_auxiliary_name")}{value}'
 
-        v['pre_annotating'] = {}
+        v['filtering'] = new_filter_conditions
         return v
 
 
