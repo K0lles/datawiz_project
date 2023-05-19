@@ -7,9 +7,76 @@ from pydantic import BaseModel, root_validator, validator
 
 from analytics.functions import validate_date_string
 from analytics.models import DimensionEnum, IntervalEnum, MetricNameEnum
-from receipts.models import CartItem
 
 CONDITION_OPTIONS: Type[str] = Literal['lte', 'gte', 'lt', 'gt', 'exact']
+
+
+class CustomDimensionBaseModel(BaseModel):
+    name: str
+    filtering: Optional[dict]
+
+    @validator('name')
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        if value not in DimensionEnum.get_all_names():
+            raise ValueError(_('Введіть коректне значення.'))
+        return value
+
+    @validator('filtering')
+    @classmethod
+    def filtering_includes_option(cls, v: dict) -> dict:
+        """
+        Checks whether 'filtering' contains 'option' key and whether len of
+        dictionary is at least 2.
+        """
+        if not v:
+            return v
+
+        include_option: dict = v.get('option', None)
+        if not include_option:
+            raise ValueError(_("'filtering' повинне містити 'option'."))
+
+        if len(v) < 2:
+            raise ValueError(_('Повинно бути принаймні 1 параметр для фільтрації.'))
+
+        return v
+
+    @root_validator
+    @classmethod
+    def validating_filtering_fields(cls, v: dict) -> dict:
+        """
+        Iterates through fields of 'filtering' key and validates it.
+        """
+        filtering: dict = v.pop('filtering', None)
+        if not filtering:
+            return v
+
+        option = filtering.pop('option', None)
+        model = v.get('name')
+        admissible_fields = DimensionEnum.get_fields_by_name(model)
+        v['filtering'] = {}
+
+        # checking whether every key of filtering dict is in admissible fields of model
+        # and adding to each key option for further querying
+        for key, item in filtering.items():
+            if key not in admissible_fields:
+                raise ValueError(_(f"{key} не є припустимим полем."))
+            v['filtering'][f'{key}__{option}'] = item
+
+        return v
+
+    @root_validator
+    @classmethod
+    def assign_auxiliary_fields(cls, v: dict) -> dict:
+        """
+        Checks whether chosen model is auxiliary. If yes, adds
+        auxiliary name for correct further filtering
+        """
+        model: Type[Model] = DimensionEnum.get_model_by_name(v.get('name'))
+        v['name'] = model.__name__
+        v['pre_values'] = list(DimensionEnum.get_fields_by_model(model))
+
+        return v
 
 
 class DimensionQualifierBaseModel(BaseModel):
@@ -21,7 +88,7 @@ class DimensionQualifierBaseModel(BaseModel):
         if v in list(IntervalEnum.get_applicable_fields()):
             return IntervalBaseModel
         elif v in list(DimensionEnum.__members__):
-            return DimensionBaseModel
+            return CustomDimensionBaseModel
 
         raise ValueError(_('Оберіть правильний "name".'))
 
@@ -34,7 +101,7 @@ class DimensionBaseModel(BaseModel):
     @classmethod
     def name_validator(cls, v) -> Type[Model]:
         """
-        Getting from Enum respective Model of dimension
+        Getting from Enum respective Model of dimension.
         """
         try:
             return DimensionEnum.get_model_by_name(v)
@@ -118,7 +185,6 @@ class IntervalBaseModel(BaseModel):
 
         v['pre_values'] = [name]
         v['pre_annotation'] = {name: IntervalEnum.get_trunc_by_name(name)}
-        v['name'] = CartItem
         return v
 
 
@@ -247,7 +313,7 @@ class DateRangeBaseModel(BaseModel):
         lower_date = datetime.strptime(v[0], '%Y-%m-%d')
         higher_date = datetime.strptime(v[1], '%Y-%m-%d')
 
-        if lower_date >= higher_date:
+        if lower_date > higher_date:
             raise ValueError(_('Дати повинні різнитися та початкова дата повинна бути меншою за кінцеву.'))
 
         return v
@@ -258,7 +324,7 @@ class DateRangeBaseModel(BaseModel):
         lower_date = datetime.strptime(v[0], '%Y-%m-%d')
         higher_date = datetime.strptime(v[1], '%Y-%m-%d')
 
-        if lower_date >= higher_date:
+        if lower_date > higher_date:
             raise ValueError(_('Дати повинні різнитися та початкова дата повинна бути меншою за кінцеву.'))
 
         return v
@@ -274,13 +340,13 @@ class DateRangeBaseModel(BaseModel):
             answer['previous_pre_filtering'] = {}
             date_range: list = v.get('prev_date_range', None)
 
-            answer['previous_pre_filtering']['date__gte'] = date_range[0]
-            answer['previous_pre_filtering']['date__lte'] = date_range[1]
+            answer['previous_pre_filtering']['date__date__gte'] = date_range[0]
+            answer['previous_pre_filtering']['date__date__lte'] = date_range[1]
 
         answer['pre_filtering'] = {}
 
         date_range: list = v.get('date_range')
-        answer['pre_filtering']['date__gte'] = date_range[0]
-        answer['pre_filtering']['date__lte'] = date_range[1]
+        answer['pre_filtering']['date__date__gte'] = date_range[0]
+        answer['pre_filtering']['date__date__lte'] = date_range[1]
 
         return answer

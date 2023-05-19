@@ -2,6 +2,7 @@ services:
 
   db:
     image: postgres:14.5-alpine
+    shm_size: 512m
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -11,6 +12,7 @@ services:
     restart: on-failure
 
   redis:
+    container_name: datawiz_project-redis
     image: redis:alpine
     restart: always
     ports:

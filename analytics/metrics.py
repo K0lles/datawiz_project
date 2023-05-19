@@ -1,10 +1,9 @@
 from django.db.models import (Avg, CharField, Count, DateField, F, FloatField,
-                              IntegerField, OuterRef, Subquery, Sum, Value)
+                              IntegerField, Max, Min, Sum, Value)
 from django.db.models.functions import Round
 from django.utils.translation import gettext_lazy as _
 
 from analytics.serializers import MetricOptionBaseModel
-from receipts.models import CartItem
 
 
 class ModelMetric:
@@ -88,7 +87,7 @@ class ModelMetric:
         Returns annotate query for getting turnover
         by summing of qty sold items
         """
-        field_to_paste = self.perform_field_assignment('cartitem__qty')
+        field_to_paste = self.perform_field_assignment('cartitem__total_price')
         query = {self.name: Round(Sum(field_to_paste, output_field=FloatField()), 2)}
         return query
 
@@ -97,7 +96,7 @@ class ModelMetric:
         Returns annotate query for getting income
         """
         field_to_paste = self.perform_field_assignment('cartitem__margin_price_total')
-        query = {self.name: Sum(field_to_paste)}
+        query = {self.name: Round(Sum(field_to_paste), 2)}
         return query
 
     def sold_product_amount(self) -> dict[str, Sum]:
@@ -133,18 +132,20 @@ class ModelMetric:
         # forming fields, which will appears in subquery filtering
         filtering_cart_items_field = '__'.join(reversed_fields) + '__' + class_name + '__pk'
 
-        filtering_fields = {filtering_cart_items_field: OuterRef('pk')}
+        if filtering_cart_items_field.startswith('__'):
+            filtering_cart_items_field = filtering_cart_items_field[2:]
 
+        filtering_fields = {filtering_cart_items_field: F('pk')}
         return filtering_fields
 
     def first_product_date(self) -> dict:
-        subquery = CartItem.objects.filter(**self.form_subquery_filtering()).order_by('date').values('date')[:1]
-        annotation = {'first_product_date': Subquery(subquery, output_field=DateField())}
+        annotation = {'first_product_date': Min(self.perform_field_assignment('cartitem__date'),
+                                                output_field=DateField())}
         return annotation
 
     def last_product_date(self) -> dict:
-        subquery = CartItem.objects.filter(**self.form_subquery_filtering()).order_by('-date').values('date')[:1]
-        annotation = {'last_product_date': Subquery(subquery, output_field=DateField())}
+        annotation = {'last_product_date': Max(self.perform_field_assignment('cartitem__date'),
+                                               output_field=DateField())}
         return annotation
 
     def clear_related(self) -> None:
@@ -240,3 +241,10 @@ class CartItemMetric(ModelMetric):
     def perform_field_assignment(self, field: str) -> str:
         field = field.replace('cartitem__', '')
         return super().perform_field_assignment(field)
+
+    def form_subquery_filtering(self) -> dict:
+        return {'pk': F('pk')}
+
+    def response(self) -> dict:
+        return {'annotation': self.get_annotation_query(),
+                'post_filtering': self.process_options()}

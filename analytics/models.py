@@ -24,10 +24,21 @@ class DimensionEnum(Enum):
     shop_group = ('shop_group', FullShopGroupShopMaterializedView, ('id', 'name'))
 
     @classmethod
+    def get_all_model_fields(cls) -> list:
+        return [item.value[0] for item in cls]
+
+    @classmethod
     def get_model_by_name(cls, name: str) -> Type[Model]:
         for item in cls:
             if item.value[0] == name:
                 return item.value[1]
+        raise ValueError(_("Введіть коректне значення 'name'."))
+
+    @classmethod
+    def get_fields_by_name(cls, name: str) -> Tuple[str, str]:
+        for item in cls:
+            if item.value[0] == name:
+                return item.value[2]
         raise ValueError(_("Введіть коректне значення 'name'."))
 
     @classmethod
