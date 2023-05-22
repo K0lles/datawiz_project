@@ -1,6 +1,8 @@
+import datetime
 import hashlib
 import json
 import operator
+from datetime import timedelta
 from enum import Enum
 from typing import Type
 
@@ -20,6 +22,7 @@ from analytics.metrics import (CartItemMetric,
                                FullShopGroupShopMaterializedViewMetric,
                                ModelMetric, ProducerMetric, ProductMetric,
                                ShopMetric, SupplierMetric, TerminalMetric)
+from analytics.models import IntervalEnum
 from analytics.serializers import (DateRangeBaseModel,
                                    DimensionQualifierBaseModel,
                                    MetricsBaseModel)
@@ -91,6 +94,9 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         self.date_previous_pre_filtering = {}
 
         self.parsing_fields = {}
+
+    def get_interval_class(self) -> Type[IntervalEnum]:
+        return IntervalEnum
 
     def form_cache_key(self, date_range_filtering: dict) -> str:
         cache_data = {
@@ -246,15 +252,31 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         df.rename(columns=self.parsing_fields, inplace=True)
         return df.to_dict(orient='records')
 
+    def get_timedelta(self, first_date: str, last_date: str) -> timedelta:
+        return datetime.datetime.strptime(last_date, '%Y-%m-%d') - datetime.datetime.strptime(first_date, '%Y-%m-%d')
+
+    def get_interval_field(self) -> str:
+        return list(self.pre_annotation.keys())[0]
+
     def apply_dataframe_without_common_fields(self,
                                               current_range_df: pd.DataFrame,
-                                              prev_range_df: pd.DataFrame) -> list:
+                                              prev_range_df: pd.DataFrame) -> pd.DataFrame:
         """
         Evaluated dataframes with common fields
         """
+
+        # drops indexes in order to get all records be able to subtract
+        current_range_df.reset_index(drop=True, inplace=True)
+        prev_range_df.reset_index(drop=True, inplace=True)
+        print('current in APPLYWITHOUT:')
+        print(current_range_df)
+        print('previous in APPLIWITHOUT:')
+        print(prev_range_df)
         for obj in self.dataframe_filtering:
             name: str = obj.get('name')
             existing_name = name.replace('_diff', '').replace('_percent', '')
+
+            print(f'name: {name} extisting name: {existing_name}')
 
             # Calculate the 'field_diff' by subtracting 'field' from the previous DataFrame
             if 'percent' in name:
@@ -265,7 +287,7 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
                 current_range_df[name] = round(current_range_df[existing_name] - prev_range_df[existing_name], 2)
 
             # Fill NaN values in 'field_diff' with 'field' from the current DataFrame
-            current_range_df[name].fillna(current_range_df[existing_name])
+            current_range_df[name].fillna(current_range_df[existing_name], inplace=True)
 
             # iterating through 'options' inside every field and applying them
             for filter_data in obj.get('options', {}):
@@ -278,11 +300,12 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
                 filter_condition = comparison_func(current_range_df[name], value)
 
                 current_range_df = current_range_df[filter_condition]
-        return current_range_df.to_dict(orient='records')
+        return current_range_df
 
-    def apply_dataframe_with_common_fields(self, filtered_df: pd.DataFrame,
+    def apply_dataframe_with_common_fields(self,
+                                           filtered_df: pd.DataFrame,
                                            common_fields: list,
-                                           exception_fields: list) -> list:
+                                           exception_fields: list) -> pd.DataFrame:
         """
         Evaluates all metric without having common fields (only interval dimensions)
         """
@@ -300,8 +323,8 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
                 filtered_df[name] = round(filtered_df[existing_name]
                                           - filtered_df[f'{existing_name}_prev'], 2)
 
-            # Fill NaN values in 'turnover_diff' with 'turnover' from the current DataFrame
-            filtered_df[name].fillna(filtered_df[existing_name], inplace=True)
+            # Fill NaN values in 'field_diff' with 'field' from the current DataFrame
+            filtered_df[name].fillna(filtered_df[existing_name])
 
             # iterating through 'options' inside every field and applying them
             for filter_data in obj.get('options', {}):
@@ -310,20 +333,40 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
 
                 comparison_func = self.comparison_functions[option]
 
-                # get comparison function in order to further filtration of df
+                # get comparison function in order to further filtration of DataFrame
                 filter_condition = comparison_func(filtered_df[name], value)
 
                 filtered_df = filtered_df[filter_condition]
 
         result_df = filtered_df[common_fields + exception_fields + dataframe_fields]
-        return result_df.to_dict(orient='records')
+        return result_df
+
+    def apply_nullable_diff(self, cut_dataframe: pd.DataFrame) -> pd.DataFrame:
+        for obj in self.dataframe_filtering:
+            name: str = obj.get('name')
+            existing_name = name.replace('_diff', '').replace('_percent', '')
+
+            cut_dataframe[name] = cut_dataframe[existing_name]
+
+            for filter_data in obj.get('options', {}):
+                option = filter_data['option']
+                value = filter_data['value']
+
+                comparison_func = self.comparison_functions[option]
+
+                # get comparison function in order to further filtration of DataFrame
+                filter_condition = comparison_func(cut_dataframe[name], value)
+
+                cut_dataframe = cut_dataframe[filter_condition]
+
+        return cut_dataframe
 
     def find_percent(self, curr_value: float, prev_value: float) -> float:
         difference = curr_value - prev_value
         try:
             return difference * 100 / prev_value
         except ZeroDivisionError:
-            return difference * 100
+            return difference
 
     def find_additions_metrics(self, current_range_response: list, prev_range_response: list) -> list:
         """
@@ -335,62 +378,75 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         print(len(current_range_response))
         print(len(prev_range_response))
 
-        # if previous daterange is less than current, it will append to the prev_date_range records from
-        # current in order to get diff and diff_percent equal 0 for dates that do not have respective date
-        # in prev_date_range
-        if len(prev_range_response) < len(current_range_response) and self.has_intervals:
-            prev_range_response = current_range_response[:len(current_range_response) - len(prev_range_response)] \
-                + prev_range_response
-
         current_range_df = pd.DataFrame(current_range_response)
         prev_range_df = pd.DataFrame(prev_range_response)
+
+        cut_current_range_df: pd.DataFrame = pd.DataFrame()
+
+        if self.has_intervals:
+            # getting timedelta of previous daterange and current daterange
+            prev_timedelta = self.get_timedelta(list(self.date_previous_pre_filtering.values())[0],
+                                                list(self.date_previous_pre_filtering.values())[1])
+            curr_timedelta = self.get_timedelta(list(self.date_pre_filtering.values())[0],
+                                                list(self.date_pre_filtering.values())[1])
+
+            # if timedelta of previous daterange is less, we cut off from current daterange DataFrame all
+            # records, whose interval date does not match previous (it means we persist here only last days,
+            # that could be evaluated with dates of previous range)
+            if prev_timedelta < curr_timedelta:
+                print(f'{prev_timedelta} < {curr_timedelta}')
+                interval_field: str = self.get_interval_field()
+                last_date_current_range = datetime.datetime.strptime(list(self.date_pre_filtering.values())[1],
+                                                                     '%Y-%m-%d')
+
+                start_date_current_range: datetime = last_date_current_range - \
+                    timedelta(days=prev_timedelta.days)
+
+                # get period for further truncating of the date
+                to_period_form = self.get_interval_class().get_to_period_by_name(self.get_interval_field())
+
+                # Convert start_date_current_range to UTC datetime if it's not already and truncate
+                # it to predefined period
+                start_date_current_range = pd.to_datetime(start_date_current_range)\
+                    .to_period(to_period_form)\
+                    .to_timestamp()\
+                    .tz_localize('UTC')
+
+                print(f'start_date_current_range: {start_date_current_range}')
+
+                # DataFrame whose intervals does NOT match previous daterange
+                cut_current_df = current_range_df[current_range_df[interval_field] < start_date_current_range]
+
+                # filters current DataFrame with only matching interval date
+                current_range_df = current_range_df[current_range_df[interval_field] >= start_date_current_range]
+
+                cut_current_range_df = self.apply_nullable_diff(cut_current_df)
 
         print(current_range_df)
         print(prev_range_df)
 
+        # defines common field by which it must be merged
         exception_fields = list(self.main_annotation.keys()) + list(self.pre_annotation.keys())
         common_fields = [field for field in current_range_df.columns if field not in exception_fields]
 
-        print(common_fields)
         if common_fields:
-            filtered_df = current_range_df.merge(prev_range_df, on=common_fields, suffixes=('', '_prev'))
-            return self.apply_dataframe_with_common_fields(filtered_df, common_fields, exception_fields)
+            filtered_df: pd.DataFrame = current_range_df.merge(prev_range_df, on=common_fields, suffixes=('', '_prev'))
+            result_df = self.apply_dataframe_with_common_fields(filtered_df, common_fields, exception_fields)
         else:
-            return self.apply_dataframe_without_common_fields(current_range_df, prev_range_df)
-            # filtered_df = current_range_df.merge(prev_range_df, suffixes=('', '_prev'))
+            result_df = self.apply_dataframe_without_common_fields(current_range_df, prev_range_df)
 
-        # print(filtered_df)
-        # dataframe_fields = []
-        # for obj in self.dataframe_filtering:
-        #     name: str = obj.get('name')
-        #     dataframe_fields.append(name)
-        #     existing_name = name.replace('_diff', '').replace('_percent', '')
-        #
-        #     # Calculate the 'field_diff' and 'field_diff_percent' by subtracting 'field' from the previous DataFrame
-        #     if 'percent' in name:
-        #         filtered_df[name] = round(self.find_percent(
-        #             filtered_df[existing_name], filtered_df[f'{existing_name}_prev']), 2)
-        #     else:
-        #         filtered_df[name] = round(filtered_df[existing_name]
-        #                                   - filtered_df[f'{existing_name}_prev'], 2)
-        #
-        #     # Fill NaN values in 'turnover_diff' with 'turnover' from the current DataFrame
-        #     filtered_df[name].fillna(filtered_df[existing_name], inplace=True)
-        #
-        #     # iterating through 'options' inside every field and applying them
-        #     for filter_data in obj.get('options', {}):
-        #         option = filter_data['option']
-        #         value = filter_data['value']
-        #
-        #         comparison_func = comparison_functions[option]
-        #
-        #         # get comparison function in order to further filtration of df
-        #         filter_condition = comparison_func(filtered_df[name], value)
-        #
-        #         filtered_df = filtered_df[filter_condition]
-        #
-        # result_df = filtered_df[common_fields + exception_fields + dataframe_fields]
-        # return result_df.to_dict(orient='records')
+        print('result is:')
+        print(result_df)
+
+        # if there is cut DataFrame with unmatched dates we concatenate it ignoring indexes
+        print(f'cut_current is: {cut_current_range_df}')
+        if not cut_current_range_df.empty:
+            result_df = pd.concat([cut_current_range_df, result_df], ignore_index=True)
+
+        print('concatenated result:')
+        print(result_df)
+
+        return result_df.to_dict(orient='records')
 
     # def calculate_totals(self, answer: list):
     #     records_df = pd.DataFrame(answer)
@@ -435,6 +491,8 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
                                                           use_adapting=True)
             records_list = self.find_additions_metrics(list(current_range_response), list(prev_range_response))
             records_list = self.rename_columns(records_list)
+            paginated_response = self.paginate_queryset(records_list)
+            print(paginated_response)
             return self.get_paginated_response(self.paginate_queryset(records_list))
 
         current_range_response = self.rename_columns(current_range_response)

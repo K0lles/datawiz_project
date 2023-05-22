@@ -54,10 +54,10 @@ class DimensionEnum(Enum):
 
 
 class IntervalEnum(Enum):
-    day_month_year = ('day-month-year', TruncDay('date'))
-    month_year = ('month-year', TruncMonth('date'))
-    year = ('year', TruncYear('date'))
-    hour = ('hour', TruncHour('date'))
+    day_month_year = ('day-month-year', TruncDay('date'), 'D')
+    month_year = ('month-year', TruncMonth('date'), 'M')
+    year = ('year', TruncYear('date'), 'Y')
+    hour = ('hour', TruncHour('date'), 'H')
 
     @classmethod
     def get_trunc_by_name(cls, name: str) -> TruncBase:
@@ -71,6 +71,16 @@ class IntervalEnum(Enum):
         fields = list(cls.__members__)
         display_field = [field.replace('_', '-') for field in fields]
         return display_field
+
+    @classmethod
+    def get_to_period_by_name(cls, name: str) -> str:
+        """
+        Returns string, which is used in .to_period() method for correct truncating
+        """
+        for interval in cls:
+            if interval.value[0] == name:
+                return interval.value[2]
+        raise ValueError(f"Invalid first element: {name}")
 
 
 class MetricNameEnum(Enum):
