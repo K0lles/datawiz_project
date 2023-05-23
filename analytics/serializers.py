@@ -1,19 +1,61 @@
-from datetime import datetime
-from typing import Any, List, Literal, Optional, Type
+from typing import Literal, Optional, Type
 
 from django.db.models import Model
 from django.utils.translation import gettext_lazy as _
-from pydantic import BaseModel, root_validator, validator
+from pydantic import BaseModel, Field, root_validator, validator
+from pydantic.datetime_parse import date
 
-from analytics.functions import validate_date_string
-from analytics.models import DimensionEnum, IntervalEnum, MetricNameEnum
+from analytics.constants import (CONDITION_OPTIONS, METRIC_NAME_OPTIONS,
+                                 STRING_CONDITIONS)
+from analytics.models import DimensionEnum, IntervalEnum
 
-CONDITION_OPTIONS: Type[str] = Literal['lte', 'gte', 'lt', 'gt', 'exact']
+
+class BaseFilteringBaseModel(BaseModel):
+    """
+    Validates each field in options in dimension object
+    """
+    field: str
+    value: str
+    option: Literal[STRING_CONDITIONS]
 
 
-class CustomDimensionBaseModel(BaseModel):
+class FilteringBaseModel(BaseModel):
+    """
+    Parses options of dimension objects to
+    relevant for querying structure
+    """
+    model: type[Model]
+    field: str
+    value: str
+    option: Literal[STRING_CONDITIONS]
+
+    @root_validator
+    @classmethod
+    def check_name_consistency(cls, values: dict) -> dict:
+        field_name = values.get('field', None)
+        admissible_fields = DimensionEnum.get_fields_by_model(model=values.get('model', None))
+
+        if field_name not in admissible_fields:
+            raise ValueError(_('"field" повинне містити поле із моделі.'))
+
+        return values
+
+    @root_validator
+    @classmethod
+    def adapt_filtering_fields(cls, values: dict) -> dict:
+        field: str = values.get('field')
+        value: str = values.get('value')
+        option: str = values.get('option')
+        return {
+            'filtering': {
+                f'{field}__{option}': value
+            }
+        }
+
+
+class DimensionBaseModel(BaseModel):
     name: str
-    filtering: Optional[dict]
+    filtering: Optional[list[BaseFilteringBaseModel]] = []
 
     @validator('name')
     @classmethod
@@ -22,61 +64,35 @@ class CustomDimensionBaseModel(BaseModel):
             raise ValueError(_('Введіть коректне значення.'))
         return value
 
-    @validator('filtering')
+    @root_validator
     @classmethod
-    def filtering_includes_option(cls, v: dict) -> dict:
-        """
-        Checks whether 'filtering' contains 'option' key and whether len of
-        dictionary is at least 2.
-        """
-        if not v:
-            return v
+    def validate_filtering(cls, values: dict) -> dict:
+        filtering_conditions: dict[str, str] = {}
+        model: Type[Model] = values.get('name', None)
+        if values.get('filtering') is not None:
+            for dct in values.get('filtering', None):
+                filtering_conditions.update(FilteringBaseModel(model=model,
+                                                               **dct.dict()).dict()['filtering'])
+        values['filtering'] = filtering_conditions
+        return values
 
-        include_option: dict = v.get('option', None)
-        if not include_option:
-            raise ValueError(_("'filtering' повинне містити 'option'."))
-
-        if len(v) < 2:
-            raise ValueError(_('Повинно бути принаймні 1 параметр для фільтрації.'))
-
-        return v
+    @validator('name')
+    @classmethod
+    def set_model(cls, value: str) -> Type[Model]:
+        return DimensionEnum.get_model_by_name(value)
 
     @root_validator
     @classmethod
-    def validating_filtering_fields(cls, v: dict) -> dict:
-        """
-        Iterates through fields of 'filtering' key and validates it.
-        """
-        filtering: dict = v.pop('filtering', None)
-        if not filtering:
-            return v
-
-        option = filtering.pop('option', None)
-        model = v.get('name')
-        admissible_fields = DimensionEnum.get_fields_by_name(model)
-        v['filtering'] = {}
-
-        # checking whether every key of filtering dict is in admissible fields of model
-        # and adding to each key option for further querying
-        for key, item in filtering.items():
-            if key not in admissible_fields:
-                raise ValueError(_(f"{key} не є припустимим полем."))
-            v['filtering'][f'{key}__{option}'] = item
-
-        return v
-
-    @root_validator
-    @classmethod
-    def assign_auxiliary_fields(cls, v: dict) -> dict:
+    def assign_auxiliary_fields(cls, values: dict) -> dict:
         """
         Checks whether chosen model is auxiliary. If yes, adds
         auxiliary name for correct further filtering
         """
-        model: Type[Model] = DimensionEnum.get_model_by_name(v.get('name'))
-        v['name'] = model.__name__
-        v['pre_values'] = list(DimensionEnum.get_fields_by_model(model))
+        model: Type[Model] = values.get('name')
+        values['name'] = model.__name__
+        values['pre_values'] = list(DimensionEnum.get_fields_by_model(model))
 
-        return v
+        return values
 
 
 class DimensionQualifierBaseModel(BaseModel):
@@ -88,91 +104,9 @@ class DimensionQualifierBaseModel(BaseModel):
         if v in list(IntervalEnum.get_applicable_fields()):
             return IntervalBaseModel
         elif v in list(DimensionEnum.__members__):
-            return CustomDimensionBaseModel
+            return DimensionBaseModel
 
         raise ValueError(_('Оберіть правильний "name".'))
-
-
-class DimensionBaseModel(BaseModel):
-    name: str
-    filtering: Optional[dict]
-
-    @validator('name')
-    @classmethod
-    def name_validator(cls, v) -> Type[Model]:
-        """
-        Getting from Enum respective Model of dimension.
-        """
-        try:
-            return DimensionEnum.get_model_by_name(v)
-        except KeyError:
-            raise ValueError(_('Введіть коректне значення.'))
-
-    @validator('filtering')
-    @classmethod
-    def filtering_includes_option(cls, v: dict) -> dict:
-        """
-        Checks whether 'filtering' contains 'option' key.
-        """
-        if not v:
-            return v
-
-        include_option: dict = v.get('option', None)
-        if not include_option:
-            raise ValueError(_("'fitering' повинне містити 'option'."))
-
-        return v
-
-    @root_validator
-    @classmethod
-    def validating_filtering_fields(cls, v: dict) -> dict:
-        """
-        Iterates through fields of 'filtering' key and validates it.
-        """
-        filtering: dict = v.pop('filtering', None)
-        if not filtering:
-            return v
-
-        option = filtering.pop('option', None)
-        model = v.get('name')
-        admissible_fields = DimensionEnum.get_fields_by_model(model)
-        v['filtering'] = {}
-
-        # checking whether every key of filtering dict is in admissible fields of model
-        # and adding to each key option for further querying
-        for key, item in filtering.items():
-            if key not in admissible_fields:
-                raise ValueError(_(f"{key} не є припустимим полем."))
-            v['filtering'][f'{key}__{option}'] = item
-
-        return v
-
-    @root_validator
-    @classmethod
-    def assign_auxiliary_fields(cls, v: dict) -> dict:
-        """
-        Checks whether chosen model is auxiliary. If yes, adds
-        auxiliary name for correct further filtering
-        """
-        model: Type[Model] = v.get('name')
-        filtering_conditions: dict = v.get('filtering', {})
-        v['pre_annotating'] = {}
-        v['pre_values'] = list(DimensionEnum.get_fields_by_model(model))
-
-        # if is not auxiliary or have no filters returns dict
-        if not getattr(model, 'is_auxiliary', None):
-            return v
-
-        # creates new dict and modifies all key names
-        new_filter_conditions: dict = {}
-        for key, value in filtering_conditions.items():
-            new_filter_conditions[f'{getattr(model, "get_auxiliary_name")}{key}'] = value
-
-        for index, value in enumerate(v['pre_values']):
-            v['pre_values'][index] = f'{getattr(model, "get_auxiliary_name")}{value}'
-
-        v['filtering'] = new_filter_conditions
-        return v
 
 
 class IntervalBaseModel(BaseModel):
@@ -193,160 +127,129 @@ class MetricOptionBaseModel(BaseModel):
     value: int
 
 
-class MetricsBaseModel(BaseModel):
-    metrics: List[dict]
+class MetricBaseModel(BaseModel):
+    name: Literal[METRIC_NAME_OPTIONS]
+    options: Optional[list[MetricOptionBaseModel]] = []
 
-    @validator('metrics')
+    @validator('options', pre=True)
     @classmethod
-    def check_name_existence(cls, v: list[dict]) -> list[dict]:
-        """
-        Checks whether each dict of metrics contains 'name' field
-        """
-        for metric in v:
-            metric_name: str = metric.get('name', None)
-            if not metric_name:
-                raise ValueError(_('У кожному "metric" повинен бути "name".'))
-
-            # checks whether metric_name is valid
-            if metric_name not in MetricNameEnum.get_values():
-                raise ValueError(_('Введіть правильний варіант "name".'))
-
-        return v
-
-    @validator('metrics')
-    @classmethod
-    def validate_options(cls, v: list[dict]) -> list[dict]:
-        """
-        Validates whether each option is applicable in queries
-        """
-        for metric in v:
-            if metric.get('options', None):
-                for condition in metric.get('options'):
-                    if condition:
-                        MetricOptionBaseModel(**condition)
-        return v
-
-    @validator('metrics')
-    @classmethod
-    def clear_metrics(cls, v: list[dict]) -> list[dict]:
-        """
-        Clean dictionaries except of 'name' and 'options' keys
-        """
-        for metric in v:
-            for key, value in metric.items():
-                if key not in ['name', 'options']:
-                    raise ValueError(_(f'Параметр "{key}" не передбачений.'))
-
-        return v
+    def main(cls, value: list) -> list:
+        print(f'value in values is : {value}')
+        return value
 
     @root_validator
     @classmethod
-    def define_pre_post_metrics(cls, values: dict) -> dict[str, list[Any] | bool]:
+    def define_pre_post_metric(cls, values: dict) -> dict[str, dict]:
         """
-        Sorts metrics by sequence of their execution. Metrics, that must be executed in
-        dataframes will be populated into 'dataframe_filtering', others - in
-        'post_filtering' that will be executed after annotations
+        Defines whether conditions of metrics must be executed in DataFrame
+        filtering or in query. Form dictionaries with relevant data
         """
-        v = values.get('metrics')
+        name: str = values.get('name')
+        post_filtering: dict = {}
+        dataframe_filtering: dict = {}
+
+        options: list[dict | None] = []
+
+        for option in values.get('options', []):
+            option_dict: dict = option.dict()
+            options.append(option_dict)
+
+        if '_diff' in name or '_percent' in name:
+            dataframe_filtering['name']: str = name
+            if options:
+                dataframe_filtering['options']: list[dict | None] = options
+        else:
+            post_filtering['name']: str = name
+            if options:
+                post_filtering['options']: list[dict | None] = options
+
+        return {'dataframe_filtering': dataframe_filtering, 'post_filtering': post_filtering}
+
+
+class MetricsOverallBaseModel(BaseModel):
+    metrics: list[MetricBaseModel]
+
+    @root_validator
+    @classmethod
+    def define_post_dataframe_metrics(cls, values: dict) -> dict:
         post_filtering = []
         dataframe_filtering = []
-        for metric in v:
-            metric_name: str = metric.get('name')
-            if '_diff' in metric_name or '_diff_percent' in metric_name:
-                dataframe_filtering.append(metric)
-            else:
-                post_filtering.append(metric)
+        for metric in values.get('metrics', []):
+            metric_dict = metric.dict()
 
-        return {'post_filtering': post_filtering, 'dataframe_filtering': dataframe_filtering,
-                'required_date_ranges': True if dataframe_filtering else False}
+            if metric_dict.get('post_filtering', None):
+                post_filtering.append(metric_dict['post_filtering'])
+
+            if metric_dict.get('dataframe_filtering', None):
+                dataframe_filtering.append(metric_dict['dataframe_filtering'])
+
+        return {
+            'post_filtering': post_filtering,
+            'dataframe_filtering': dataframe_filtering,
+            'required_date_ranges': bool(dataframe_filtering)
+        }
 
     @root_validator
     @classmethod
-    def adapt_post_filtering(cls, values: dict) -> dict[str, list[Any] | bool]:
+    def check_post_filtering_completeness(cls, values: dict) -> dict:
         """
-        If 'dataframe_filtering' is present, checks whether basic field by
-        which difference will be defined presents
+        Checks whether fields, that will be counted in DataFrames are present in
+        'post_filtering', if not - it adds them
         """
-        if values.get('required_date_ranges', None):
-            v = values.get('dataframe_filtering', None)
+        dataframe_metrics: list[str] = [dct['name'] for dct in values.get('dataframe_filtering', [])]
+        post_filtering: list[str] = [dct['name'] for dct in values.get('post_filtering', [])]
 
-            # getting names of post_filtering and dataframe_filtering which presents in lists currently
-            post_filtering_names: list[str] = [d['name'] for d in values.get('post_filtering')]
-            dataframe_filtering_names: list[str] = [d['name'] for d in v]
-
-            # checking whether difference base field presents in post_filtering lists, if not we add it
-            for df_name in dataframe_filtering_names:
-                post_name = df_name.replace('_diff', '').replace('_percent', '')
-                if post_name not in post_filtering_names:
-                    values['post_filtering'].append({'name': post_name})
-
+        for key in dataframe_metrics:
+            annotation_key = key.replace('_diff', '').replace('_percent', '')
+            if annotation_key not in post_filtering:
+                values['post_filtering'].append({'name': annotation_key})
         return values
 
 
 class DateRangeBaseModel(BaseModel):
-    date_range: list[str, str]  # change to date
-    prev_date_range: Optional[list[str, str]]
+    date_range: list[date, date] = Field(max_items=2, min_items=2)
+    prev_date_range: Optional[list[date, date]] = Field(max_items=2, min_items=2)
 
     previous: bool = False
 
-    @validator('date_range')
+    @validator('date_range', 'prev_date_range')
     @classmethod
-    def validate_date_range(cls, v: list[str, str]) -> list[str, str]:
-        if not validate_date_string(v[0]) or not validate_date_string(v[1]):
-            raise ValueError(_('Введіть коректні дати.'))
-        return v
+    def check_date_difference(cls, values: list[str, str]) -> list[str, str]:
+        if values[0] > values[1]:
+            raise ValueError(_('Початкова дата повинна бути меншою за кінцеву.'))
+
+        return values
 
     @root_validator
     @classmethod
-    def validate_prev_existence(cls, v: dict) -> dict:
-        if v.get('previous', None):
-            if not v.get('prev_date_range', None):
-                raise ValueError(_('Ви повинні указати попередні дати для вибірки.'))
-            if not validate_date_string(v.get('prev_date_range')[0]) \
-                    or not validate_date_string(v.get('prev_date_range')[1]):
-                raise ValueError(_('Введіть коректні дати.'))
-        return v
+    def check_prev_date_range_consistency(cls, values: dict) -> dict:
+        if values.get('previous', None) and not values.get('prev_date_range', None):
+            raise ValueError(_('Укажіть попередній проміжок.'))
 
-    @validator('date_range')
-    @classmethod
-    def check_date_difference(cls, v: list[str, str]) -> list[str, str]:
-        lower_date = datetime.strptime(v[0], '%Y-%m-%d')
-        higher_date = datetime.strptime(v[1], '%Y-%m-%d')
-
-        if lower_date > higher_date:
-            raise ValueError(_('Дати повинні різнитися та початкова дата повинна бути меншою за кінцеву.'))
-
-        return v
-
-    @validator('prev_date_range')
-    @classmethod
-    def check_prev_date_difference(cls, v: list[str, str]) -> list[str, str]:
-        lower_date = datetime.strptime(v[0], '%Y-%m-%d')
-        higher_date = datetime.strptime(v[1], '%Y-%m-%d')
-
-        if lower_date > higher_date:
-            raise ValueError(_('Дати повинні різнитися та початкова дата повинна бути меншою за кінцеву.'))
-
-        return v
+        return values
 
     @root_validator
     @classmethod
-    def parse_dates_to_filtering_conditions(cls, v: dict) -> dict:
-        answer = {'previous': v.get('previous', False)}
+    def parse_dates_to_filtering_conditions(cls, values: dict) -> dict:
+        answer = {'previous': values.get('previous', False)}
 
-        if v.get('previous', None):
+        if values.get('previous', None):
             answer['previous'] = True
 
             answer['previous_pre_filtering'] = {}
-            date_range: list = v.get('prev_date_range', None)
+            date_range: list = values.get('prev_date_range', None)
 
-            answer['previous_pre_filtering']['date__date__gte'] = date_range[0]
-            answer['previous_pre_filtering']['date__date__lte'] = date_range[1]
+            answer['previous_pre_filtering']['date__date__gte'] = date_range[0].strftime('%Y-%m-%d')
+            answer['previous_pre_filtering']['date__date__lte'] = date_range[1].strftime('%Y-%m-%d')
 
         answer['pre_filtering'] = {}
 
-        date_range: list = v.get('date_range')
-        answer['pre_filtering']['date__date__gte'] = date_range[0]
-        answer['pre_filtering']['date__date__lte'] = date_range[1]
+        date_range: list = values.get('date_range')
+        answer['pre_filtering']['date__date__gte'] = date_range[0].strftime('%Y-%m-%d')
+        answer['pre_filtering']['date__date__lte'] = date_range[1].strftime('%Y-%m-%d')
 
         return answer
+
+
+class RequestDimensionParser(BaseModel):
+    dimensions: list[DimensionBaseModel]

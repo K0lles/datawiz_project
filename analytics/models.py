@@ -6,6 +6,11 @@ from django.db.models.functions import TruncDay, TruncMonth, TruncYear
 from django.db.models.functions.datetime import TruncBase, TruncHour
 from django.utils.translation import gettext_lazy as _
 
+from analytics.metrics import (CartItemMetric,
+                               FullCategoryProductMaterializedViewMetric,
+                               FullShopGroupShopMaterializedViewMetric,
+                               ModelMetric, ProducerMetric, ProductMetric,
+                               ShopMetric, SupplierMetric, TerminalMetric)
 from products.models import (FullCategoryProductMaterializedView, Producer,
                              Product)
 from receipts.models import Supplier, Terminal
@@ -75,7 +80,7 @@ class IntervalEnum(Enum):
     @classmethod
     def get_to_period_by_name(cls, name: str) -> str:
         """
-        Returns string, which is used in .to_period() method for correct truncating
+        Returns string, which is used in .to_period() method for correct truncation
         """
         for interval in cls:
             if interval.value[0] == name:
@@ -103,3 +108,22 @@ class MetricNameEnum(Enum):
                 list_to_return.append(choice)
 
         return list_to_return
+
+
+class MetricModelsEnum(Enum):
+    fullshopgroupshopmaterializedview = ('FullShopGroupShopMaterializedView', FullShopGroupShopMaterializedViewMetric)
+    shop = ('Shop', ShopMetric)
+    terminal = ('Terminal', TerminalMetric)
+    fullcategoryproductmaterializedview = ('FullCategoryProductMaterializedView',
+                                           FullCategoryProductMaterializedViewMetric)
+    product = ('Product', ProductMetric)
+    supplier = ('Supplier', SupplierMetric)
+    producer = ('Producer', ProducerMetric)
+    cartitem = ('CartItem', CartItemMetric)
+
+    @classmethod
+    def get_metric_model_by_name(cls, name: str) -> Type[ModelMetric]:
+        for item in cls:
+            if item.value[0] == name:
+                return item.value[1]
+        raise ValueError(_("Введіть коректне значення 'name'."))

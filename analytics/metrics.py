@@ -3,12 +3,9 @@ from django.db.models import (Avg, CharField, Count, DateField, F, FloatField,
 from django.db.models.functions import Round
 from django.utils.translation import gettext_lazy as _
 
-from analytics.serializers import MetricOptionBaseModel
-
 
 class ModelMetric:
     base_field = None  # Field which define way from current model to Receipt model
-    option_validation_base_model = MetricOptionBaseModel
     contains_receipt = True  # if 'base_field' contains 'receipt'
 
     def __init__(self, name: str, options: list[dict] = None):
@@ -28,9 +25,8 @@ class ModelMetric:
         if self.options:
             filtering_options = {}
             for option in self.options:
-                validated_dict = self.option_validation_base_model(**option).dict()
-                filtering_options.update({f'{self.name}__{validated_dict.get("option", None)}':
-                                          validated_dict.get('value')})
+                filtering_options.update({f'{self.name}__{option.get("option", None)}':
+                                          option.get('value')})
             return filtering_options
 
         return {}
