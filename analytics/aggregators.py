@@ -66,6 +66,8 @@ class DimensionAggregator:
         self.dimension_data = dimension_data
         self.agg = main_agg
 
+        self.validate_dimensions()
+
         # self.has_intervals: bool = False
         # self.dimension_base_model: type[BaseModel | None] = None
         #
@@ -194,6 +196,7 @@ class DateRangesAggregator:
                  prev_date_range: list,
                  main_agg: BaseMainAggregator):
         self.agg = main_agg
+        print(f'PASSING INTO DATE PREV: {prev_date_range}')
         self.date_ranges = {
             'date_range': date_range,
             'prev_date_range': prev_date_range,
@@ -209,6 +212,7 @@ class DateRangesAggregator:
         """
         date_range_answer: dict = DateRangeBaseModel(**self.date_ranges).dict()
         self.agg.date_pre_filtering = date_range_answer.get('pre_filtering')
+        print(f'SETTING PREV_DATE_FILTERING: {date_range_answer.get("previous_pre_filtering", {})}')
         self.agg.date_previous_pre_filtering = date_range_answer.get('previous_pre_filtering', {})
 
 
@@ -222,10 +226,7 @@ class DataFrameAggregator:
         'gte': operator.ge,
     }
 
-    def __init__(self,
-                 main_agg: BaseMainAggregator,
-                 current_range_response: list,
-                 prev_range_response: list = None):
+    def __init__(self, main_agg: BaseMainAggregator):
 
         self.agg = main_agg
 
@@ -441,17 +442,17 @@ class MainAggregator(BaseMainAggregator):
 
         self.dimension_aggregator = self.dimension_aggregator_class(self.dimensions, self)
         self.metric_aggregator = self.metric_aggregator_class(self.metrics_data, self.model_name, self)
-        self.date_range_aggregator = self.date_range_aggregator_class(self.date_range, self.date_range, self)
+        self.date_range_aggregator = self.date_range_aggregator_class(self.date_range, self.prev_date_range, self)
 
-    def evaluate_dataframes(self,
-                            current_range_response: list,
-                            prev_range_response: list = None):
-        dataframe = self.dataframe_aggregator_class(
-            self,
-            current_range_response,
-            prev_range_response
-        )
-        return self.rename_columns(dataframe.find_additions_metrics(current_range_response, prev_range_response))
+    # def evaluate_dataframes(self,
+    #                         current_range_response: list,
+    #                         prev_range_response: list = None):
+    #     dataframe = self.dataframe_aggregator_class(
+    #         self,
+    #         current_range_response,
+    #         prev_range_response
+    #     )
+    #     return self.rename_columns(dataframe.find_additions_metrics(current_range_response, prev_range_response))
 
     def rename_columns(self, queryset: list) -> list:
         df = pd.DataFrame(queryset)

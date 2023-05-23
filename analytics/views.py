@@ -10,7 +10,7 @@ from rest_framework.fields import CharField
 from rest_framework.generics import CreateAPIView
 from rest_framework.response import Response
 
-from analytics.aggregators import MainAggregator
+from analytics.aggregators import DataFrameAggregator, MainAggregator
 from analytics.models import IntervalEnum
 from datawiz_project.paginators import CustomNumberPaginator
 from receipts.models import CartItem
@@ -19,6 +19,7 @@ from receipts.models import CartItem
 class AnalyticsRetrieveAPIView(CreateAPIView):
     serializer_class = None
     aggregator_class = MainAggregator
+    dataframe_aggregator_class = DataFrameAggregator
     pagination_class = CustomNumberPaginator
     model = CartItem
     metric_field_assign_model = 'FieldAssignment'
@@ -484,24 +485,15 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
     )
     def post(self, request, *args, **kwargs) -> Response:
         self.aggregator: MainAggregator = self.aggregator_class(**request.data)
-        # self.get_data_from_request()
-        #
-        # self.validate_dimensions()
-        #
-        # self.set_metric_validation_model()
-        #
-        # self.validate_metric_answers()
-        #
-        # self.validate_date_ranges()
 
         current_range_response: list = self.get_queryset(self.aggregator.date_pre_filtering)
         if self.aggregator.required_previous_date_range:
             prev_range_response: list = self.get_queryset(self.aggregator.date_previous_pre_filtering,
                                                           use_adapting=True)
-            # self.aggregator.evaluate_dataframes(current_range_response,
-            #                                     prev_range_response)
-            records_list = self.aggregator.evaluate_dataframes(list(current_range_response), list(prev_range_response))
-            # records_list = self.rename_columns(records_list)
+
+            records_list = self.dataframe_aggregator_class(self.aggregator)\
+                .find_additions_metrics(current_range_response,
+                                        prev_range_response)
             return self.get_paginated_response(self.paginate_queryset(records_list))
 
         current_range_response = self.aggregator.rename_columns(current_range_response)

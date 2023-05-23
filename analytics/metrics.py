@@ -100,7 +100,7 @@ class ModelMetric:
         Returns annotate query for getting sold amount of products
         """
         field_to_paste = self.perform_field_assignment('cartitem__qty')
-        query = {self.name: Sum(field_to_paste, output_field=FloatField())}
+        query = {self.name: Round(Sum(field_to_paste, output_field=FloatField()), 2)}
         return query
 
     def receipt_amount(self) -> dict[str, Count]:
