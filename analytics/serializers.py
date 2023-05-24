@@ -232,7 +232,6 @@ class DateRangeBaseModel(BaseModel):
     @classmethod
     def parse_dates_to_filtering_conditions(cls, values: dict) -> dict:
         answer = {'previous': values.get('previous', False)}
-        print(f'VALUES: {values}')
 
         if values.get('previous', None):
             answer['previous'] = True
@@ -248,8 +247,6 @@ class DateRangeBaseModel(BaseModel):
         date_range: list = values.get('date_range')
         answer['pre_filtering']['date__date__gte'] = date_range[0].strftime('%Y-%m-%d')
         answer['pre_filtering']['date__date__lte'] = date_range[1].strftime('%Y-%m-%d')
-
-        print(f'RETURNING DATES FROM VALIDATIOD: {answer}')
 
         return answer
 

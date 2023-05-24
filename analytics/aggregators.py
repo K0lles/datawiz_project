@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from analytics import dimensions as dm
 from analytics.metrics import ModelMetric
-from analytics.models import IntervalEnum, MetricModelsEnum
+from analytics.models import IntervalEnum, MetricModelsEnum, MetricNameEnum
 from analytics.serializers import (DateRangeBaseModel,
                                    DimensionQualifierBaseModel,
                                    MetricsOverallBaseModel)
@@ -196,7 +196,6 @@ class DateRangesAggregator:
                  prev_date_range: list,
                  main_agg: BaseMainAggregator):
         self.agg = main_agg
-        print(f'PASSING INTO DATE PREV: {prev_date_range}')
         self.date_ranges = {
             'date_range': date_range,
             'prev_date_range': prev_date_range,
@@ -212,7 +211,6 @@ class DateRangesAggregator:
         """
         date_range_answer: dict = DateRangeBaseModel(**self.date_ranges).dict()
         self.agg.date_pre_filtering = date_range_answer.get('pre_filtering')
-        print(f'SETTING PREV_DATE_FILTERING: {date_range_answer.get("previous_pre_filtering", {})}')
         self.agg.date_previous_pre_filtering = date_range_answer.get('previous_pre_filtering', {})
 
 
@@ -249,15 +247,10 @@ class DataFrameAggregator:
         # drops indexes in order to get all records be able to subtract
         current_range_df.reset_index(drop=True, inplace=True)
         prev_range_df.reset_index(drop=True, inplace=True)
-        print('current in APPLYWITHOUT:')
-        print(current_range_df)
-        print('previous in APPLIWITHOUT:')
-        print(prev_range_df)
+
         for obj in self.agg.dataframe_filtering:
             name: str = obj.get('name')
             existing_name = name.replace('_diff', '').replace('_percent', '')
-
-            print(f'name: {name} extisting name: {existing_name}')
 
             # Calculate the 'field_diff' by subtracting 'field' from the previous DataFrame
             if 'percent' in name:
@@ -374,9 +367,8 @@ class DataFrameAggregator:
             # records, whose interval date does not match previous (it means we persist here only last days,
             # that could be evaluated with dates of previous range)
             if prev_timedelta < curr_timedelta:
-                print(f'{prev_timedelta} < {curr_timedelta}')
                 interval_field: str = self.get_interval_field()
-                # TODO: Should try to change with '%Y-%m' etc.
+
                 last_date_current_range = datetime.datetime.strptime(list(self.agg.date_pre_filtering.values())[1],
                                                                      '%Y-%m-%d')
 
@@ -393,8 +385,6 @@ class DataFrameAggregator:
                     .to_timestamp()\
                     .tz_localize('UTC')
 
-                print(f'start_date_current_range: {start_date_current_range}')
-
                 # DataFrame whose intervals does NOT match previous daterange
                 cut_current_df = current_range_df[current_range_df[interval_field] < start_date_current_range]
 
@@ -402,9 +392,6 @@ class DataFrameAggregator:
                 current_range_df = current_range_df[current_range_df[interval_field] >= start_date_current_range]
 
                 cut_current_range_df = self.apply_nullable_diff(cut_current_df)
-
-        print(current_range_df)
-        print(prev_range_df)
 
         # defines common field by which it must be merged
         exception_fields = list(self.agg.main_annotation.keys()) + list(self.agg.pre_annotation.keys())
@@ -416,16 +403,9 @@ class DataFrameAggregator:
         else:
             result_df = self.apply_dataframe_without_common_fields(current_range_df, prev_range_df)
 
-        print('result is:')
-        print(result_df)
-
         # if there is cut DataFrame with unmatched dates we concatenate it ignoring indexes
-        print(f'cut_current is: {cut_current_range_df}')
         if not cut_current_range_df.empty:
             result_df = pd.concat([cut_current_range_df, result_df], ignore_index=True)
-
-        print('concatenated result:')
-        print(result_df)
 
         return result_df.to_dict(orient='records')
 
@@ -444,17 +424,31 @@ class MainAggregator(BaseMainAggregator):
         self.metric_aggregator = self.metric_aggregator_class(self.metrics_data, self.model_name, self)
         self.date_range_aggregator = self.date_range_aggregator_class(self.date_range, self.prev_date_range, self)
 
-    # def evaluate_dataframes(self,
-    #                         current_range_response: list,
-    #                         prev_range_response: list = None):
-    #     dataframe = self.dataframe_aggregator_class(
-    #         self,
-    #         current_range_response,
-    #         prev_range_response
-    #     )
-    #     return self.rename_columns(dataframe.find_additions_metrics(current_range_response, prev_range_response))
-
     def rename_columns(self, queryset: list) -> list:
         df = pd.DataFrame(queryset)
         df.rename(columns=self.parsing_fields, inplace=True)
+        return df.to_dict(orient='records')
+
+    def count_metric_totals(self, data: list[dict]) -> list[dict]:
+        df: pd.DataFrame = pd.DataFrame(data)
+
+        # Get the intersection of columns from MetricNameEnum and DataFrame
+        columns_to_sum = list(set(MetricNameEnum.get_values()) & set(df.columns))
+
+        # Calculate the sum for selected columns
+        sums = df[columns_to_sum].sum().round(2)
+
+        # Create the totals row with sum values and '-' in other columns
+        totals_row = pd.Series(['Totals'], index=[df.columns[0]])
+        totals_row = pd.concat([totals_row, sums])
+
+        for i, column in enumerate(df.columns):
+            if i == 0:
+                continue  # Skip the first column
+            if column not in MetricNameEnum.get_values():
+                totals_row[column] = '-'
+
+        # Append the totals row to the original DataFrame
+        df = pd.concat([df, totals_row.to_frame().T], ignore_index=True)
+
         return df.to_dict(orient='records')

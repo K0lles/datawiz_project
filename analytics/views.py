@@ -6,6 +6,8 @@ from typing import Type
 from django.core.cache import cache
 from drf_spectacular.utils import (OpenApiParameter, extend_schema,
                                    inline_serializer)
+from pydantic import ValidationError
+from rest_framework import status
 from rest_framework.fields import CharField
 from rest_framework.generics import CreateAPIView
 from rest_framework.response import Response
@@ -87,27 +89,25 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         else:
             main_annotation = self.aggregator.main_annotation
             post_filtering = self.aggregator.post_filtering
-        print()
-        print(f'self.model_name: {self.aggregator.model_name}')
-        print(f'self.pre_annotation: {self.aggregator.pre_annotation}')
-        print(f'self.pre_values: {self.aggregator.pre_values}')
-        print(f'self.pre_filtering: {self.aggregator.pre_filtering}')
-        print(f'self.main_annotation: {main_annotation}')
-        print(f'self.post_filtering: {post_filtering}')
-        print(f'date_range_filtering: {date_range_filtering}')
-
-        print(f'self.parsing_fields: {self.aggregator.parsing_fields}')
-
-        # print(f'dataframe_filtering: {self.dataframe_filtering}')
-
-        print(
-            f'{self.aggregator.model_name.__name__}.objects.annotate({self.aggregator.pre_annotation})'
-            f'.values({self.aggregator.pre_values})'
-            f'.filter({self.aggregator.pre_filtering}, {date_range_filtering}).annotate({main_annotation})'
-            f'.filter({post_filtering})')
+        # print()
+        # print(f'self.model_name: {self.aggregator.model_name}')
+        # print(f'self.pre_annotation: {self.aggregator.pre_annotation}')
+        # print(f'self.pre_values: {self.aggregator.pre_values}')
+        # print(f'self.pre_filtering: {self.aggregator.pre_filtering}')
+        # print(f'self.main_annotation: {main_annotation}')
+        # print(f'self.post_filtering: {post_filtering}')
+        # print(f'date_range_filtering: {date_range_filtering}')
+        #
+        # print(f'self.parsing_fields: {self.aggregator.parsing_fields}')
+        #
+        # # print(f'dataframe_filtering: {self.dataframe_filtering}')
+        #
+        # print(
+        #     f'{self.aggregator.model_name.__name__}.objects.annotate({self.aggregator.pre_annotation})'
+        #     f'.values({self.aggregator.pre_values})'
+        #     f'.filter({self.aggregator.pre_filtering}, {date_range_filtering}).annotate({main_annotation})'
+        #     f'.filter({post_filtering})')
         queryset = cache.get(self.form_cache_key(date_range_filtering))
-
-        print()
         if queryset:
             return queryset
 
@@ -468,13 +468,20 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
     #     #     paginated_response = self.calculate_totals(paginated_response)
     #     return self.get_paginated_response(paginated_response)
 
+    def get_totals(self, data: list[dict]) -> list[dict]:
+        if self.request.query_params.get('apply_total', None):
+            return self.aggregator.count_metric_totals(data)
+        return data
+
     @extend_schema(
         parameters=[
             OpenApiParameter(name='page_size', location=OpenApiParameter.QUERY,
                              description='Size of the queryset that will be returned', required=False, type=int),
             OpenApiParameter(name='page', location=OpenApiParameter.QUERY,
                              description='Number of the page of the queryset that will be returned', required=False,
-                             type=int)
+                             type=int),
+            OpenApiParameter(name='apply_total', location=OpenApiParameter.QUERY,
+                             description='Counts totals of each metric', required=False, type=str)
         ],
         request=inline_serializer(
             name='Analytics',
@@ -484,20 +491,23 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         )
     )
     def post(self, request, *args, **kwargs) -> Response:
-        self.aggregator: MainAggregator = self.aggregator_class(**request.data)
+        try:
+            self.aggregator: MainAggregator = self.aggregator_class(**request.data)
+        except ValidationError as e:
+            return Response(data=e.errors(), status=status.HTTP_400_BAD_REQUEST)
 
         current_range_response: list = self.get_queryset(self.aggregator.date_pre_filtering)
         if self.aggregator.required_previous_date_range:
             prev_range_response: list = self.get_queryset(self.aggregator.date_previous_pre_filtering,
                                                           use_adapting=True)
 
-            records_list = self.dataframe_aggregator_class(self.aggregator)\
-                .find_additions_metrics(current_range_response,
-                                        prev_range_response)
-            return self.get_paginated_response(self.paginate_queryset(records_list))
+            dataframe_aggregator = self.dataframe_aggregator_class(self.aggregator)
+            records_list = dataframe_aggregator.find_additions_metrics(current_range_response, prev_range_response)
+            records_list = self.paginate_queryset(self.aggregator.rename_columns(records_list))
+            answer = self.get_totals(records_list)
+            return self.get_paginated_response(answer)
 
         current_range_response = self.aggregator.rename_columns(current_range_response)
         paginated_response = self.paginate_queryset(current_range_response)
-        # if self.request.query_params.get('evaluate_totals', None):
-        #     paginated_response = self.calculate_totals(paginated_response)
-        return self.get_paginated_response(paginated_response)
+        answer = self.get_totals(paginated_response)
+        return self.get_paginated_response(answer)
