@@ -5,11 +5,15 @@ from typing import Type
 
 import pandas as pd
 from django.db.models import Model
+from django.utils.translation import gettext_lazy as _
 from pydantic import BaseModel
+from rest_framework.exceptions import ValidationError
 
 from analytics import dimensions as dm
+from analytics.constants import DIFF, PERCENT
 from analytics.metrics import ModelMetric
-from analytics.models import IntervalEnum, MetricModelsEnum, MetricNameEnum
+from analytics.models import (DimensionEnum, IntervalEnum, MetricModelsEnum,
+                              MetricNameEnum)
 from analytics.serializers import (DateRangeBaseModel,
                                    DimensionQualifierBaseModel,
                                    MetricsOverallBaseModel)
@@ -68,18 +72,6 @@ class DimensionAggregator:
 
         self.validate_dimensions()
 
-        # self.has_intervals: bool = False
-        # self.dimension_base_model: type[BaseModel | None] = None
-        #
-        # self.select_related: list = []
-        # self.prefetch_related: list = []
-        #
-        # self.pre_filtering: dict = {}
-        # self.pre_values: list = []
-        # self.pre_annotation: dict = {}
-        #
-        # self.parsing_fields: dict = {}
-
     def get_dimension_base_model(self, dimension_name: str) -> None:
         self.dimension_base_model: Type[BaseModel] = DimensionQualifierBaseModel(name=dimension_name).dict()['name']
         self.agg.has_intervals = True if self.dimension_base_model.__name__ == 'IntervalBaseModel' \
@@ -108,17 +100,6 @@ class DimensionAggregator:
         self.agg.pre_values.extend(answer.get('pre_values', []))
         self.agg.parsing_fields.update(answer.get('parsed_field_names', {}))
 
-    # def response(self) -> dict:
-    #     self.validate_dimensions()
-    #     return {
-    #         'has_intervals': self.has_intervals,
-    #         'dimension_base_model': self.dimension_base_model,
-    #         'pre_filtering': self.pre_filtering,
-    #         'pre_values': self.pre_values,
-    #         'pre_annotation': self.pre_annotation,
-    #         'parsing_fields': self.parsing_fields
-    #     }
-
 
 class MetricAggregator:
 
@@ -130,15 +111,6 @@ class MetricAggregator:
 
         # is used when validating model metrics. Not for outer scope usage
         self.model_metric: type[ModelMetric | None] = None
-
-        # self.main_annotation: dict = {}
-        # self.adapted_annotation: dict = {}
-        # self.post_filtering: dict = {}
-        # self.adapted_post_filtering: dict = {}
-        #
-        # self.dataframe_filtering = {}
-        #
-        # self.required_previous_date_range: bool = False
 
         self.set_metric_validation_model()
         self.validate_metric_answers()
@@ -177,7 +149,7 @@ class MetricAggregator:
         """
         dataframe_names = []
         for element in self.agg.dataframe_filtering:
-            dataframe_names.append(element['name'].replace('_diff', '').replace('_percent', ''))
+            dataframe_names.append(element['name'].replace(DIFF, '').replace(PERCENT, ''))
 
         for key, value in self.agg.main_annotation.items():
             if key in dataframe_names:
@@ -250,7 +222,7 @@ class DataFrameAggregator:
 
         for obj in self.agg.dataframe_filtering:
             name: str = obj.get('name')
-            existing_name = name.replace('_diff', '').replace('_percent', '')
+            existing_name = name.replace(DIFF, '').replace(PERCENT, '')
 
             # Calculate the 'field_diff' by subtracting 'field' from the previous DataFrame
             if 'percent' in name:
@@ -287,7 +259,7 @@ class DataFrameAggregator:
         for obj in self.agg.dataframe_filtering:
             name: str = obj.get('name')
             dataframe_fields.append(name)
-            existing_name = name.replace('_diff', '').replace('_percent', '')
+            existing_name = name.replace(DIFF, '').replace(PERCENT, '')
 
             # Calculate the 'field_diff' and 'field_diff_percent' by subtracting 'field' from the previous DataFrame
             if 'percent' in name:
@@ -318,7 +290,7 @@ class DataFrameAggregator:
     def apply_nullable_diff(self, cut_dataframe: pd.DataFrame) -> pd.DataFrame:
         for obj in self.agg.dataframe_filtering:
             name: str = obj.get('name')
-            existing_name = name.replace('_diff', '').replace('_percent', '')
+            existing_name = name.replace(DIFF, '').replace(PERCENT, '')
 
             cut_dataframe[name] = cut_dataframe[existing_name]
 
@@ -429,9 +401,19 @@ class MainAggregator(BaseMainAggregator):
         df.rename(columns=self.parsing_fields, inplace=True)
         return df.to_dict(orient='records')
 
-    def count_metric_totals(self, data: list[dict]) -> list[dict]:
-        df: pd.DataFrame = pd.DataFrame(data)
+    def search(self, df: pd.DataFrame, field: str, value: str) -> pd.DataFrame:
+        if field not in DimensionEnum.get_all_dimension_fields() or field not in df.columns:
+            raise ValidationError(detail={'error': _('Введіть коректне поле для пошуку.')})
 
+        if not value:
+            return df
+
+        return df[df[field].astype(str).str.contains(value, regex=False)]
+
+    def count_metric_totals(self, df: pd.DataFrame) -> list[dict]:
+        """
+        Evaluates totals for each metric field and adds it to the end of DataFrame
+        """
         # Get the intersection of columns from MetricNameEnum and DataFrame
         columns_to_sum = list(set(MetricNameEnum.get_values()) & set(df.columns))
 
@@ -442,6 +424,7 @@ class MainAggregator(BaseMainAggregator):
         totals_row = pd.Series(['Totals'], index=[df.columns[0]])
         totals_row = pd.concat([totals_row, sums])
 
+        # name first column with 'Totals'
         for i, column in enumerate(df.columns):
             if i == 0:
                 continue  # Skip the first column
@@ -452,3 +435,15 @@ class MainAggregator(BaseMainAggregator):
         df = pd.concat([df, totals_row.to_frame().T], ignore_index=True)
 
         return df.to_dict(orient='records')
+
+    def sort_by_dimension_name(self, df: pd.DataFrame, dimension_field: str) -> pd.DataFrame:
+        """
+        Sorts values in DataFrame by indicated dimension field name
+        """
+        name_field = dimension_field.replace('-', '')
+
+        # checks whether dimension field name is valid
+        if name_field not in MetricNameEnum.get_values() or name_field not in df.columns:
+            raise ValidationError(detail={'ordering': _('Введіть коректний розріз для сортування.')})
+
+        return df.sort_values(by=name_field, ascending=(not dimension_field.startswith('-')))

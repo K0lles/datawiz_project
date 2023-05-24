@@ -5,8 +5,8 @@ from django.utils.translation import gettext_lazy as _
 from pydantic import BaseModel, Field, root_validator, validator
 from pydantic.datetime_parse import date
 
-from analytics.constants import (CONDITION_OPTIONS, METRIC_NAME_OPTIONS,
-                                 STRING_CONDITIONS)
+from analytics.constants import (CONDITION_OPTIONS, DIFF, METRIC_NAME_OPTIONS,
+                                 PERCENT, STRING_CONDITIONS)
 from analytics.models import DimensionEnum, IntervalEnum
 
 
@@ -154,7 +154,7 @@ class MetricBaseModel(BaseModel):
             option_dict: dict = option.dict()
             options.append(option_dict)
 
-        if '_diff' in name or '_percent' in name:
+        if DIFF in name or PERCENT in name:
             dataframe_filtering['name']: str = name
             if options:
                 dataframe_filtering['options']: list[dict | None] = options
@@ -200,7 +200,7 @@ class MetricsOverallBaseModel(BaseModel):
         post_filtering: list[str] = [dct['name'] for dct in values.get('post_filtering', [])]
 
         for key in dataframe_metrics:
-            annotation_key = key.replace('_diff', '').replace('_percent', '')
+            annotation_key = key.replace(DIFF, '').replace(PERCENT, '')
             if annotation_key not in post_filtering:
                 values['post_filtering'].append({'name': annotation_key})
         return values

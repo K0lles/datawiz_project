@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import List, Tuple, Type
 
 from django.db.models import Model
 from django.db.models.functions import TruncDay, TruncMonth, TruncYear
@@ -26,36 +25,43 @@ class DimensionEnum(Enum):
     supplier = ('supplier', Supplier, ('id', 'name',))
 
     shop = ('shop', Shop, ('id', 'name'))
-    shop_group = ('shop_group', FullShopGroupShopMaterializedView, ('id', 'name'))
+    group = ('group', FullShopGroupShopMaterializedView, ('id', 'name'))
 
     @classmethod
     def get_all_model_fields(cls) -> list:
         return [item.value[0] for item in cls]
 
     @classmethod
-    def get_model_by_name(cls, name: str) -> Type[Model]:
+    def get_model_by_name(cls, name: str) -> type[Model]:
         for item in cls:
             if item.value[0] == name:
                 return item.value[1]
         raise ValueError(_("Введіть коректне значення 'name'."))
 
     @classmethod
-    def get_fields_by_name(cls, name: str) -> Tuple[str, str]:
+    def get_fields_by_name(cls, name: str) -> tuple[str, str]:
         for item in cls:
             if item.value[0] == name:
                 return item.value[2]
         raise ValueError(_("Введіть коректне значення 'name'."))
 
     @classmethod
-    def get_fields_by_model(cls, model: Type[Model]) -> Tuple[str, str]:
+    def get_fields_by_model(cls, model: type[Model]) -> tuple[str, str]:
         for item in cls:
             if item.value[1] == model:
                 return item.value[2]
         raise ValueError(_("Введіть коректну 'model'."))
 
     @classmethod
-    def get_all_names(cls) -> List[str]:
+    def get_all_names(cls) -> list[str]:
         return [item.value[0] for item in cls]
+
+    @classmethod
+    def get_all_dimension_fields(cls) -> list[str]:
+        field_names: list[str] = []
+        for value in cls:
+            field_names.extend([f"{value.value[0]}__{field}" for field in value.value[2]])
+        return field_names
 
 
 class IntervalEnum(Enum):
@@ -122,7 +128,7 @@ class MetricModelsEnum(Enum):
     cartitem = ('CartItem', CartItemMetric)
 
     @classmethod
-    def get_metric_model_by_name(cls, name: str) -> Type[ModelMetric]:
+    def get_metric_model_by_name(cls, name: str) -> type[ModelMetric]:
         for item in cls:
             if item.value[0] == name:
                 return item.value[1]
