@@ -1,7 +1,7 @@
 import datetime
 import operator
 from datetime import timedelta
-from typing import Type
+from typing import Optional, Type
 
 import pandas as pd
 from django.db.models import Model
@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from rest_framework.exceptions import ValidationError
 
 from analytics import dimensions as dm
-from analytics.constants import DIFF, PERCENT
+from analytics.constants import (DIFF, MAX_DATE_COLUMNS, MIN_DATE_COLUMNS,
+                                 NON_BILLABLE_COLUMNS, PERCENT)
 from analytics.metrics import ModelMetric
 from analytics.models import (DimensionEnum, IntervalEnum, MetricModelsEnum,
                               MetricNameEnum)
@@ -35,10 +36,10 @@ class BaseMainAggregator:
                 or not self.model_name:
             raise AttributeError(f"Base class fields are not defined in {self.__class__.__name__}.")
 
-        self.dimensions: list = dimensions
-        self.metrics_data: list = metrics
-        self.date_range: list = date_range
-        self.prev_date_range: list = prev_date_range
+        self.dimensions: list[dict] = dimensions
+        self.metrics_data: list[dict] = metrics
+        self.date_range: list[str, str] = date_range
+        self.prev_date_range: Optional[list[str, str]] = prev_date_range
 
         # fields for dimensions
         self.pre_annotation: dict = {}
@@ -129,12 +130,15 @@ class MetricAggregator:
         """
         metric_answer: dict = MetricsOverallBaseModel(metrics=self.metrics_data).dict()
 
+        # variable for correct setting of 'product_article' and 'product_barcode'
+        has_product_dimension: bool = 'product' in [item['name'] for item in self.agg.dimensions]
+
         self.agg.required_previous_date_range = metric_answer.get('required_date_ranges', False)
 
         self.agg.dataframe_filtering = metric_answer.get('dataframe_filtering', {})
 
         for metric in metric_answer.get('post_filtering', []):
-            parsed_metric_answers = self.model_metric(**metric).response()
+            parsed_metric_answers = self.model_metric(**metric, has_product_dimension=has_product_dimension).response()
             self.agg.main_annotation.update(parsed_metric_answers.get('annotation', {}))
             self.agg.post_filtering.update(parsed_metric_answers.get('post_filtering', {}))
 
@@ -410,37 +414,56 @@ class MainAggregator(BaseMainAggregator):
 
         return df[df[field].astype(str).str.contains(value, regex=False)]
 
-    def count_metric_totals(self, df: pd.DataFrame) -> list[dict]:
+    def count_metric_totals(self, df: pd.DataFrame) -> pd.Series:
         """
         Evaluates totals for each metric field and adds it to the end of DataFrame
         """
-        # Get the intersection of columns from MetricNameEnum and DataFrame
-        columns_to_sum = list(set(MetricNameEnum.get_values()) & set(df.columns))
+
+        if df.empty:
+            return pd.Series()
+
+        # get the intersection of columns from MetricNameEnum and DataFrame,
+        # excluding column which are non-billable or should be processed in another way
+        columns_to_sum = [
+            column for column in list(set(MetricNameEnum.get_values()) & set(df.columns))
+            if column not in NON_BILLABLE_COLUMNS + MIN_DATE_COLUMNS + MAX_DATE_COLUMNS
+        ]
+
+        # get the intersection of min and max columns
+        columns_to_min = list(set(MIN_DATE_COLUMNS) & set(df.columns))
+        columns_to_max = list(set(MAX_DATE_COLUMNS) & set(df.columns))
+
+        for column in columns_to_min + columns_to_max:
+            df[column] = pd.to_datetime(df[column], format='%Y-%m-%d')
+
+        min_evals = df[columns_to_min].min().apply(lambda x: x.strftime('%Y-%m-%d'))
+        max_evals = df[columns_to_max].max().apply(lambda x: x.strftime('%Y-%m-%d'))
 
         # Calculate the sum for selected columns
         sums = df[columns_to_sum].sum().round(2)
 
         # Create the totals row with sum values and '-' in other columns
         totals_row = pd.Series(['Totals'], index=[df.columns[0]])
-        totals_row = pd.concat([totals_row, sums])
+        totals_row = pd.concat([totals_row, sums, min_evals, max_evals])
 
         # name first column with 'Totals'
         for i, column in enumerate(df.columns):
             if i == 0:
                 continue  # Skip the first column
-            if column not in MetricNameEnum.get_values():
+            if column in NON_BILLABLE_COLUMNS \
+                    or column not in MetricNameEnum.get_values():
                 totals_row[column] = '-'
 
-        # Append the totals row to the original DataFrame
-        df = pd.concat([df, totals_row.to_frame().T], ignore_index=True)
-
-        return df.to_dict(orient='records')
+        return totals_row
 
     def sort_by_dimension_name(self, df: pd.DataFrame, dimension_field: str) -> pd.DataFrame:
         """
         Sorts values in DataFrame by indicated dimension field name
         """
         name_field = dimension_field.replace('-', '')
+
+        if df.empty:
+            return df
 
         # checks whether dimension field name is valid
         if name_field not in MetricNameEnum.get_values() or name_field not in df.columns:

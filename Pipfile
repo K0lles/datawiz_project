@@ -27,6 +27,6 @@ python_full_version = "3.10.6"
 
 [scripts]
 start-db = "sudo docker compose up -d"
-down-db = "sudo docker compose down"
+stop-db = "sudo docker compose down"
 start = "python3 manage.py runserver"
 clear-cache = "sudo docker exec -it datawiz_project-redis redis-cli flushall"

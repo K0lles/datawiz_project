@@ -5,8 +5,9 @@ from django.utils.translation import gettext_lazy as _
 from pydantic import BaseModel, Field, root_validator, validator
 from pydantic.datetime_parse import date
 
-from analytics.constants import (CONDITION_OPTIONS, DIFF, METRIC_NAME_OPTIONS,
-                                 PERCENT, STRING_CONDITIONS)
+from analytics.constants import (CONDITION_OPTIONS, CONDITIONS_UNION, DIFF,
+                                 LIST_CONDITIONS_LIST, METRIC_NAME_OPTIONS,
+                                 PERCENT, STRING_CONDITIONS_LIST)
 from analytics.models import DimensionEnum, IntervalEnum
 
 
@@ -15,8 +16,21 @@ class BaseFilteringBaseModel(BaseModel):
     Validates each field in options in dimension object
     """
     field: str
-    value: str
-    option: Literal[STRING_CONDITIONS]
+    value: list[str] | str
+    option: Literal[CONDITIONS_UNION]
+
+    @root_validator
+    @classmethod
+    def validate_list_value(cls, values: dict) -> dict:
+        if isinstance(values.get('value', None), list):
+            if values.get('option', None) not in list(LIST_CONDITIONS_LIST):
+                raise ValueError(_('Вкажіть правильний "option".'))
+
+        if isinstance(values.get('value', None), str):
+            if values.get('option', None) not in list(STRING_CONDITIONS_LIST):
+                raise ValueError(_('Вкажіть правильний "option".'))
+
+        return values
 
 
 class FilteringBaseModel(BaseModel):
@@ -26,8 +40,8 @@ class FilteringBaseModel(BaseModel):
     """
     model: type[Model]
     field: str
-    value: str
-    option: Literal[STRING_CONDITIONS]
+    value: list[str] | str
+    option: Literal[CONDITIONS_UNION]
 
     @root_validator
     @classmethod
@@ -124,18 +138,12 @@ class IntervalBaseModel(BaseModel):
 
 class MetricOptionBaseModel(BaseModel):
     option: Literal[CONDITION_OPTIONS]
-    value: int
+    value: float
 
 
 class MetricBaseModel(BaseModel):
     name: Literal[METRIC_NAME_OPTIONS]
     options: Optional[list[MetricOptionBaseModel]] = []
-
-    @validator('options', pre=True)
-    @classmethod
-    def main(cls, value: list) -> list:
-        print(f'value in values is : {value}')
-        return value
 
     @root_validator
     @classmethod
@@ -249,7 +257,3 @@ class DateRangeBaseModel(BaseModel):
         answer['pre_filtering']['date__date__lte'] = date_range[1].strftime('%Y-%m-%d')
 
         return answer
-
-
-class RequestDimensionParser(BaseModel):
-    dimensions: list[DimensionBaseModel]

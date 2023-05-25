@@ -172,13 +172,13 @@ class ModelMetric:
 
     def product_article(self) -> dict:
         """
-        Article of product will be returned only in Shop model metric
+        Article of product will be returned only in Product model metric
         """
         return self.empty_value()
 
     def product_barcode(self) -> dict:
         """
-        Barcode of product will be returned only in Shop model metric
+        Barcode of product will be returned only in Product model metric
         """
         return self.empty_value()
 
@@ -234,12 +234,23 @@ class CartItemMetric(ModelMetric):
     base_field = ''
     contains_receipt = False
 
+    def __init__(self, name: str, options: list[dict] = None, has_product_dimension: bool = False):
+        super().__init__(name, options)
+        self.has_product_dimension: bool = has_product_dimension
+
     def perform_field_assignment(self, field: str) -> str:
         field = field.replace('cartitem__', '')
         return super().perform_field_assignment(field)
 
-    def form_subquery_filtering(self) -> dict:
-        return {'pk': F('pk')}
+    def product_article(self) -> dict:
+        if self.has_product_dimension:
+            return {self.name: F('product__article')}
+        return super().product_article()
+
+    def product_barcode(self) -> dict:
+        if self.has_product_dimension:
+            return {self.name: F('product__barcode')}
+        return super().product_barcode()
 
     def response(self) -> dict:
         return {'annotation': self.get_annotation_query(),

@@ -56,6 +56,9 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         return queryset
 
     def perform_filtration(self, data: list[dict]) -> list[dict]:
+        """
+        Filters and sorts all data using aggregator
+        """
         df = pd.DataFrame(data)
         if self.request.query_params.get('field', None) and self.request.query_params.get('value', None):
             df = self.aggregator.search(df,
@@ -66,17 +69,28 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
 
         return df.to_dict(orient='records')
 
-    def totals_evaluation(self, data: list[dict]) -> list[dict]:
+    def totals_evaluation(self, data: list[dict]) -> pd.Series:
+        """
+        Counts totals of metrics
+        """
         df = pd.DataFrame(data)
         if self.request.query_params.get('apply_total', None):
             return self.aggregator.count_metric_totals(df)
-        return df.to_dict(orient='records')
+        return pd.Series()
 
     def process_response(self, data: list[dict]) -> list[dict]:
+        """
+        Unions filtering, sorting and total execution
+        """
         filtrated_response = self.perform_filtration(data)
-        paginated_response = self.paginate_queryset(self.aggregator.rename_columns(filtrated_response))
-        counted_response = self.totals_evaluation(paginated_response)
-        return counted_response
+        counted_response_series: pd.Series = self.totals_evaluation(filtrated_response)
+        paginated_response = self.paginate_queryset(filtrated_response)
+        concatenated_response = paginated_response
+        if not counted_response_series.empty:
+            concatenated_response = pd.concat([pd.DataFrame(paginated_response), counted_response_series.to_frame().T],
+                                              ignore_index=True)\
+                .to_dict(orient='records')
+        return concatenated_response
 
     @extend_schema(
         parameters=[
@@ -88,7 +102,7 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
             OpenApiParameter(name='apply_total', location=OpenApiParameter.QUERY,
                              description='Counts totals of each metric', required=False, type=str),
             OpenApiParameter(name='ordering', location=OpenApiParameter.QUERY,
-                             description='Dimension field name for sorting', required=False, type=str),
+                             description='Metric field name for sorting', required=False, type=str),
             OpenApiParameter(name='field', location=OpenApiParameter.QUERY,
                              description='Field name by which searching will be executed',
                              required=False, type=str),
@@ -113,7 +127,6 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         if self.aggregator.required_previous_date_range:
             prev_range_response: list = self.get_queryset(self.aggregator.date_previous_pre_filtering,
                                                           use_adapting=True)
-
             dataframe_aggregator = self.dataframe_aggregator_class(self.aggregator)
             records_list = dataframe_aggregator.find_additions_metrics(current_range_response, prev_range_response)
             records_list_renamed = self.aggregator.rename_columns(records_list)
