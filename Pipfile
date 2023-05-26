@@ -23,10 +23,9 @@ pre-commit = "*"
 
 [requires]
 python_version = "3.10"
-python_full_version = "3.10.6"
 
 [scripts]
-start-db = "sudo docker compose up -d"
-stop-db = "sudo docker compose down"
-start = "python3 manage.py runserver"
+up = "sudo docker compose up"
+down = "sudo docker compose down"
+start = "python3 manage.py runserver 0.0.0.0:8000"
 clear-cache = "sudo docker exec -it datawiz_project-redis redis-cli flushall"

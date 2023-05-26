@@ -36,7 +36,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_swagger",
-    "debug_toolbar",
+    # "debug_toolbar",
     # apps
     "products",
     "receipts",
@@ -47,7 +47,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "debug_toolbar.middleware.DebugToolbarMiddleware",
+    # "debug_toolbar.middleware.DebugToolbarMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -100,7 +100,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": [
-            "redis://127.0.0.1:6378"
+            env('REDIS_URL')
         ],
     }
 }
