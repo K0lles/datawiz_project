@@ -220,19 +220,20 @@ class DateRangeBaseModel(BaseModel):
 
     previous: bool = False
 
-    @validator('date_range', 'prev_date_range')
-    @classmethod
-    def check_date_difference(cls, values: list[str, str]) -> list[str, str]:
-        if values[0] > values[1]:
-            raise ValueError(_('Початкова дата повинна бути меншою за кінцеву.'))
-
-        return values
-
-    @root_validator
+    @root_validator(pre=True)
     @classmethod
     def check_prev_date_range_consistency(cls, values: dict) -> dict:
         if values.get('previous', None) and not values.get('prev_date_range', None):
             raise ValueError(_('Укажіть попередній проміжок.'))
+
+        return values
+
+    @validator('date_range', 'prev_date_range')
+    @classmethod
+    def check_date_difference(cls, values: list[str, str]) -> list[str, str]:
+        if values:
+            if values[0] > values[1]:
+                raise ValueError(_('Початкова дата повинна бути меншою за кінцеву.'))
 
         return values
 
