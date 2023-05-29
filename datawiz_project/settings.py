@@ -1,21 +1,22 @@
 import os.path
 from pathlib import Path
 
-import environ
+from dotenv import dotenv_values, load_dotenv
 
-env = environ.Env(
-    # set casting, default value
-    DEBUG=(bool, False)
-)
+dotenv_location = os.getenv("PIPENV_DOTENV_LOCATION", '.env')
+
+if dotenv_location:
+    load_dotenv(dotenv_path=dotenv_location)
+else:
+    load_dotenv(dotenv_path='.env')
+
+env = dotenv_values(dotenv_location)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
-
-
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = env("SECRET_KEY")
+SECRET_KEY = env["SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -88,11 +89,11 @@ WSGI_APPLICATION = "datawiz_project.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
-        "NAME": env("DB_NAME"),
-        "USER": env("DB_USER"),
-        "PASSWORD": env("DB_PASSWORD"),
-        "HOST": env("DB_HOST"),
-        "PORT": env("DB_PORT"),
+        "NAME": env["DB_NAME"],
+        "USER": env["DB_USER"],
+        "PASSWORD": env["DB_PASSWORD"],
+        "HOST": env["DB_HOST"],
+        "PORT": env["DB_PORT"],
     }
 }
 
@@ -100,7 +101,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": [
-            env('REDIS_URL')
+            env['REDIS_URL']
         ],
     }
 }

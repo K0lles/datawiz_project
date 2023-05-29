@@ -1,3 +1,4 @@
+import datetime
 from typing import Literal, Optional, Type
 
 from django.db.models import Model
@@ -5,10 +6,19 @@ from django.utils.translation import gettext_lazy as _
 from pydantic import BaseModel, Field, root_validator, validator
 from pydantic.datetime_parse import date
 
-from analytics.constants import (CONDITION_OPTIONS, CONDITIONS_UNION, DIFF,
-                                 LIST_CONDITIONS_LIST, METRIC_NAME_OPTIONS,
-                                 PERCENT, STRING_CONDITIONS_LIST)
-from analytics.models import DimensionEnum, IntervalEnum
+from analytics.constants import (CONDITION_OPTIONS, DIFF, FILTERING_UNION,
+                                 FLOAT_DATE_CONDITION_OPTIONS,
+                                 LIST_FILTERING_LIST, METRIC_NAME_OPTIONS,
+                                 PERCENT, STRING_CONDITION_OPTIONS,
+                                 STRING_FILTERING_LIST)
+from analytics.models import DimensionEnum, IntervalEnum, MetricNameEnum
+
+
+class BaseInputBaseModel(BaseModel):
+    dimensions: list[dict] = Field(min_items=1)
+    metrics: list[dict] = Field(min_items=1)
+    date_range: list[str] = Field(min_items=2)
+    prev_date_range: Optional[list[str]]
 
 
 class BaseFilteringBaseModel(BaseModel):
@@ -17,17 +27,17 @@ class BaseFilteringBaseModel(BaseModel):
     """
     field: str
     value: list[str] | str
-    option: Literal[CONDITIONS_UNION]
+    option: Literal[FILTERING_UNION]
 
     @root_validator
     @classmethod
     def validate_list_value(cls, values: dict) -> dict:
         if isinstance(values.get('value', None), list):
-            if values.get('option', None) not in list(LIST_CONDITIONS_LIST):
+            if values.get('option', None) not in list(LIST_FILTERING_LIST):
                 raise ValueError(_('Вкажіть правильний "option".'))
 
         if isinstance(values.get('value', None), str):
-            if values.get('option', None) not in list(STRING_CONDITIONS_LIST):
+            if values.get('option', None) not in list(STRING_FILTERING_LIST):
                 raise ValueError(_('Вкажіть правильний "option".'))
 
         return values
@@ -41,7 +51,7 @@ class FilteringBaseModel(BaseModel):
     model: type[Model]
     field: str
     value: list[str] | str
-    option: Literal[CONDITIONS_UNION]
+    option: Literal[FILTERING_UNION]
 
     @root_validator
     @classmethod
@@ -138,7 +148,60 @@ class IntervalBaseModel(BaseModel):
 
 class MetricOptionBaseModel(BaseModel):
     option: Literal[CONDITION_OPTIONS]
-    value: float
+    value: float | str
+
+    @root_validator
+    @classmethod
+    def parse_date_value_to_string(cls, values: dict) -> dict:
+        if isinstance(values.get('value'), date):
+            values['value'] = values.get('value').strftime('%Y-%m-%d')
+
+        return values
+
+
+class MetricNameOptionValueConsistenceBaseModel(BaseModel):
+    name: str
+    value: float | str
+    option: Literal[CONDITION_OPTIONS]
+
+    @root_validator
+    @classmethod
+    def consistence_name_with_value(cls, values: dict) -> dict:
+
+        # in case if filtering is for float metric
+        if values.get('name') not in MetricNameEnum.get_string_metrics() and \
+                values.get('name') not in MetricNameEnum.get_date_metrics():
+            if values.get('option') not in FLOAT_DATE_CONDITION_OPTIONS:
+                raise ValueError(_('Вкажіть правильний "option" для фільтрації.'))
+
+            # try to convert value to float for correct further filtration
+            try:
+                values['value'] = float(values['value'])
+            except (ValueError, TypeError, AttributeError):
+                raise ValueError(_('Вкажіть правильний формат "value".'))
+
+        # in case if filtering is for date metric
+        elif values.get('name') in MetricNameEnum.get_date_metrics():
+            if values.get('option') not in FLOAT_DATE_CONDITION_OPTIONS:
+                raise ValueError(_('Вкажіть правильний "option" для фільтрації.'))
+
+            # check whether input string is date formattable and parse it to string again
+            if not isinstance(values['value'], date):
+                try:
+                    values['value'] = datetime.datetime.strptime(values['value'], '%Y-%m-%d')
+                except (ValueError, TypeError, AttributeError):
+                    raise ValueError(_('Вкажіть правильний формат "value".'))
+            values['value'] = values['value'].strftime('%Y-%m-%d')
+
+        # in case if filtering is for string metric
+        else:
+            if values.get('option') not in STRING_CONDITION_OPTIONS:
+                raise ValueError(_('Вкажіть правильний "option" для фільтрації.'))
+            # if input is in number type convert it to string cutting decimal part
+            if isinstance(values['value'], float | int):
+                values['value'] = str(int(values['value']))
+
+        return values
 
 
 class MetricBaseModel(BaseModel):
@@ -160,6 +223,9 @@ class MetricBaseModel(BaseModel):
 
         for option in values.get('options', []):
             option_dict: dict = option.dict()
+
+            # check whether name and option are relevant and could be correctly filtered
+            option_dict = MetricNameOptionValueConsistenceBaseModel(name=name, **option_dict).dict()
             options.append(option_dict)
 
         if DIFF in name or PERCENT in name:

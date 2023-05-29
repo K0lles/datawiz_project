@@ -3,15 +3,17 @@ import json
 
 import pandas as pd
 from django.core.cache import cache
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import (OpenApiParameter, extend_schema,
                                    inline_serializer)
 from pydantic import ValidationError
-from rest_framework import status
-from rest_framework.fields import CharField
+from rest_framework import serializers, status
+from rest_framework.fields import CharField, FloatField
 from rest_framework.generics import CreateAPIView
 from rest_framework.response import Response
 
 from analytics.aggregators import DataFrameAggregator, MainAggregator
+from analytics.serializers import BaseInputBaseModel
 from datawiz_project.paginators import CustomNumberPaginator
 
 
@@ -113,15 +115,57 @@ class AnalyticsRetrieveAPIView(CreateAPIView):
         request=inline_serializer(
             name='Analytics',
             fields={
-                'name': CharField()
+                'dimensions': inline_serializer(
+                    name='Dimensions',
+                    fields={
+                        'name': CharField(),
+                        'filtering': inline_serializer(
+                            'Filtering conditions',
+                            fields={
+                                'field': CharField(),
+                                'value': CharField(),
+                                'option': CharField()
+                            },
+                            many=True
+                        ),
+                    },
+                    many=True
+                ),
+                'metrics': inline_serializer(
+                    name='Metrics',
+                    fields={
+                        'name': CharField(),
+                        'options': inline_serializer(
+                            name='Conditions in metrics',
+                            fields={
+                                'value': FloatField(),
+                                'option': CharField()
+                            },
+                            many=True
+                        )
+                    },
+                    many=True
+                ),
+                'date_range': serializers.ListField(
+                    child=serializers.CharField(),
+                    default=['2022-02-04', '2022-02-10']
+                ),
+                'prev_date_range': serializers.ListField(
+                    child=serializers.CharField(),
+                    default=['2022-01-01', '2022-01-10'],
+                    required=False
+                )
             }
         )
     )
     def post(self, request, *args, **kwargs) -> Response:
         try:
+            BaseInputBaseModel(**request.data)
             self.aggregator: MainAggregator = self.aggregator_class(**request.data)
         except ValidationError as e:
             return Response(data=e.errors(), status=status.HTTP_400_BAD_REQUEST)
+        except TypeError:
+            return Response(data={'detail': _('Перевірте правильність введених полів.')})
 
         current_range_response: list = self.get_queryset(self.aggregator.date_pre_filtering)
         if self.aggregator.required_previous_date_range:

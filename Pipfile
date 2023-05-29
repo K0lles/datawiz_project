@@ -16,6 +16,7 @@ numpy = "*"
 django-rest-swagger = "*"
 drf-spectacular = "*"
 redis = "*"
+python-dotenv = "*"
 
 [dev-packages]
 django-debug-toolbar = "*"
@@ -25,7 +26,7 @@ pre-commit = "*"
 python_version = "3.10"
 
 [scripts]
-up = "sudo docker compose up"
-down = "sudo docker compose down"
+up = "docker compose up"
+down = "docker compose down"
 start = "python3 manage.py runserver 0.0.0.0:8000"
-clear-cache = "sudo docker exec -it datawiz_project-redis redis-cli flushall"
+clear-cache = "docker exec -it datawiz_project-redis redis-cli flushall"

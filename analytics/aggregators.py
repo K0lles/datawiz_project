@@ -374,8 +374,13 @@ class DataFrameAggregator:
         common_fields = [field for field in current_range_df.columns if field not in exception_fields]
 
         if common_fields:
-            filtered_df: pd.DataFrame = current_range_df.merge(prev_range_df, on=common_fields, suffixes=('', '_prev'))
-            result_df = self.apply_dataframe_with_common_fields(filtered_df, common_fields, exception_fields)
+            # if DataFrame for previous period is nullable, we apply nullable difference on current DataFrame
+            if prev_range_df.empty:
+                result_df = self.apply_nullable_diff(current_range_df)
+            else:
+                filtered_df: pd.DataFrame = current_range_df.merge(prev_range_df, on=common_fields,
+                                                                   suffixes=('', '_prev'))
+                result_df = self.apply_dataframe_with_common_fields(filtered_df, common_fields, exception_fields)
         else:
             result_df = self.apply_dataframe_without_common_fields(current_range_df, prev_range_df)
 

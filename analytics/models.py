@@ -115,6 +115,20 @@ class MetricNameEnum(Enum):
 
         return list_to_return
 
+    @classmethod
+    def get_date_metrics(cls) -> list:
+        date_metrics = []
+        for member in cls:
+            for choice in member.value:
+                if choice.endswith('_date'):
+                    date_metrics.append(choice)
+
+        return date_metrics
+
+    @classmethod
+    def get_string_metrics(cls) -> list:
+        return ['product_article', 'product_barcode']
+
 
 class MetricModelsEnum(Enum):
     fullshopgroupshopmaterializedview = ('FullShopGroupShopMaterializedView', FullShopGroupShopMaterializedViewMetric)

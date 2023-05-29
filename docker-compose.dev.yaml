@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  web:
+    command: sh -c "PIPENV_DOTENV_LOCATION=./.prod.env pipenv run start"
+    volumes:
+      - .:/usr/src/app
+    env_file:
+      - ./.prod.env
